@@ -243,15 +243,33 @@ So the loop is:
 
 ### Getting the file there
 
-| How | Setup | Feels like |
-| --- | --- | --- |
-| Upload to Drive / any cloud, open the link on the phone | none | a download |
-| Quick Share from the PC | none | a transfer |
-| Publish as a GitHub release and point [Obtainium](https://github.com/ImranR98/Obtainium) at the repo | a repo, once | the Play Store — it notices new releases and offers the update itself |
+Releases live at
+[github.com/mahesaJenar01/esa-money-tracker/releases](https://github.com/mahesaJenar01/esa-money-tracker/releases),
+and the phone watches that page through
+[Obtainium](https://github.com/ImranR98/Obtainium) — a free app that does for a
+personal APK what the Play Store does for everything else: it notices a new
+release, says so, and installs it in one tap.
 
-The last one is the closest thing to Play Store behaviour without paying the
-developer fee: Obtainium watches the releases page, tells you when a new APK is
-out, and installs it in one tap.
+Setting it up on the phone, once:
+
+1. Install Obtainium from
+   [its own releases page](https://github.com/ImranR98/Obtainium/releases)
+   (the `...-release.apk` file).
+2. **Add App** → paste `https://github.com/mahesaJenar01/esa-money-tracker`
+   → **Add**.
+3. Grant Obtainium *Install unknown apps* when it asks. That is the only
+   permission involved, and it is not developer mode.
+
+From then on: publish a release on the PC, and the phone offers the update.
+
+Dropping the file into Drive and opening the link, or Quick Sharing it from the
+PC, both work too and need no setup — they just do not tell you when there is
+something new.
+
+The repository is public, so the APK is a public download. There is nothing
+personal in either — the app keeps every rupiah on the phone and has no server
+to send it to. Your recorded transactions live only in the app's own database
+and in whatever `.json` backups you export yourself.
 
 ### Before you change the signing key
 

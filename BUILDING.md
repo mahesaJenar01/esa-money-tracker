@@ -112,6 +112,26 @@ The first prints the certificate the APK is signed with — compare its SHA-256
 digest between two releases and they must match. The second prints the package
 name and `versionCode`.
 
+### Publishing it
+
+The APK goes out as a GitHub release, which is what
+[Obtainium](https://github.com/ImranR98/Obtainium) on the phone watches.
+
+In the browser: **Releases > Draft a new release** on
+`mahesaJenar01/esa-money-tracker`, tag it `v<versionName>`, drag
+`dist\esa-money-tracker-<version>.apk` into the assets box, publish. Obtainium
+notices within its next check and offers the update.
+
+With the GitHub CLI installed (`winget install GitHub.cli`, then `gh auth login`)
+the same thing is one command:
+
+```powershell
+gh release create v1.1 dist/esa-money-tracker-1.1.apk --title "1.1" --notes "Bank per rekening, tanggal transaksi bisa diatur, riwayat dirapikan."
+```
+
+The tag has to be new each time, so bump `versionName` in `version.properties`
+when a release is worth its own name.
+
 ## One-time fix needed on this machine
 
 On this PC, the JDK cannot create an `AF_UNIX` socket anywhere under
