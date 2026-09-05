@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
+            <gradient
+                android:startX="0" android:startY="0"
+                android:endX="108" android:endY="108"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF12836B" />
+                <item android:offset="0.55" android:color="#FF0C6455" />
+                <item android:offset="1.0" android:color="#FF08423F" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Soft highlight so the icon does not read as a flat block. -->
+    <path
+        android:pathData="M84,10m-34,0a34,34 0,1 1,68 0a34,34 0,1 1,-68 0"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.07" />
+    <path
+        android:pathData="M14,100m-30,0a30,30 0,1 1,60 0a30,30 0,1 1,-60 0"
+        android:fillColor="#000000"
+        android:fillAlpha="0.10" />
+</vector>

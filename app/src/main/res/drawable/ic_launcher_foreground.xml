@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Banknote, tilted slightly for a friendlier look. -->
+    <group
+        android:name="note"
+        android:pivotX="54"
+        android:pivotY="54"
+        android:rotation="-11">
+
+        <path
+            android:pathData="M33,38 H79 A7,7 0 0 1 86,45 V67 A7,7 0 0 1 79,74 H33 A7,7 0 0 1 26,67 V45 A7,7 0 0 1 33,38 Z"
+            android:fillColor="#FFFFFFFF" />
+
+        <path
+            android:pathData="M33,42.5 H79 A2.5,2.5 0 0 1 81.5,45 V67 A2.5,2.5 0 0 1 79,69.5 H33 A2.5,2.5 0 0 1 30.5,67 V45 A2.5,2.5 0 0 1 33,42.5 Z"
+            android:strokeColor="#FF0C6455"
+            android:strokeWidth="1.6"
+            android:strokeAlpha="0.35" />
+
+        <!-- Centre emblem -->
+        <path
+            android:pathData="M56,56m-8.5,0a8.5,8.5 0,1 1,17 0a8.5,8.5 0,1 1,-17 0"
+            android:fillColor="#FF0C6455"
+            android:fillAlpha="0.18" />
+        <path
+            android:pathData="M56,56m-8.5,0a8.5,8.5 0,1 1,17 0a8.5,8.5 0,1 1,-17 0"
+            android:strokeColor="#FF0C6455"
+            android:strokeWidth="2" />
+
+        <!-- Corner ticks -->
+        <path android:pathData="M36,49 h6" android:strokeColor="#FF0C6455" android:strokeWidth="2.6" android:strokeLineCap="round" android:strokeAlpha="0.45" />
+        <path android:pathData="M70,63 h6" android:strokeColor="#FF0C6455" android:strokeWidth="2.6" android:strokeLineCap="round" android:strokeAlpha="0.45" />
+    </group>
+
+    <!-- Coin, overlapping the note's bottom-right corner. -->
+    <path
+        android:pathData="M67,67m-15,0a15,15 0,1 1,30 0a15,15 0,1 1,-30 0"
+        android:fillColor="#FF0A4A45" />
+    <path
+        android:pathData="M67,67m-13,0a13,13 0,1 1,26 0a13,13 0,1 1,-26 0">
+        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
+            <gradient
+                android:startX="54" android:startY="54"
+                android:endX="80" android:endY="80"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFD98A" />
+                <item android:offset="1.0" android:color="#FFE9AE38" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M67,67m-8.5,0a8.5,8.5 0,1 1,17 0a8.5,8.5 0,1 1,-17 0"
+        android:strokeColor="#FF9C6B12"
+        android:strokeWidth="1.8"
+        android:strokeAlpha="0.55" />
+</vector>

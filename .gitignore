@@ -1,0 +1,24 @@
+*.iml
+.gradle/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+
+# The signing key and its passwords. Never commit these: whoever holds the key
+# can publish an "update" to the app, and losing it means no phone can ever
+# update the app again without uninstalling it first.
+keystore.properties
+*.jks
+*.keystore
+
+# Release APKs ready to upload.
+dist/
+
+# Kotlin incremental-compilation scratch.
+.kotlin/
