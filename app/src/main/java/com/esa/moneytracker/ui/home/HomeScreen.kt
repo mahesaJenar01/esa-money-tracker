@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.esa.moneytracker.data.model.Transaction
+import com.esa.moneytracker.ui.components.BalanceCheckMark
 import com.esa.moneytracker.ui.components.BalanceHeader
 import com.esa.moneytracker.ui.components.Hairline
 import com.esa.moneytracker.ui.components.IconBadge
@@ -68,6 +69,7 @@ fun HomeScreen(
     onEdit: (String) -> Unit,
     onDelete: (String) -> Unit,
     onRestore: (String) -> Unit,
+    onDeleteCheck: (String) -> Unit,
     onOpenRecords: () -> Unit,
     onOpenBanks: () -> Unit,
     onOpenData: () -> Unit,
@@ -161,40 +163,55 @@ fun HomeScreen(
                 item("day-" + day.date) {
                     DayHeader(day)
                 }
-                items(day.items, key = { it.id }) { transaction ->
+                items(day.items, key = { it.key }) { entry ->
                     Box(Modifier.padding(horizontal = 16.dp)) {
-                        TransactionListItem(
-                            transaction = transaction,
-                            zone = zone,
-                            bankLabel = state.bankNames[transaction.bankId],
-                            expanded = expandedId == transaction.id,
-                            onToggle = {
-                                expandedId = if (expandedId == transaction.id) {
-                                    null
-                                } else {
-                                    transaction.id
-                                }
-                            },
-                            onEdit = {
-                                expandedId = null
-                                onEdit(transaction.id)
-                            },
-                            onDelete = {
-                                expandedId = null
-                                onDelete(transaction.id)
-                                scope.launch {
-                                    val result = snackbarHostState.showSnackbar(
-                                        message = "Catatan dihapus",
-                                        actionLabel = "Urungkan",
-                                        withDismissAction = true,
-                                        duration = SnackbarDuration.Long,
-                                    )
-                                    if (result == SnackbarResult.ActionPerformed) {
-                                        onRestore(transaction.id)
-                                    }
-                                }
-                            },
-                        )
+                        when (entry) {
+                            is HistoryEntry.Mark -> BalanceCheckMark(
+                                check = entry.check,
+                                zone = zone,
+                                expanded = expandedId == entry.key,
+                                onToggle = {
+                                    expandedId = if (expandedId == entry.key) null else entry.key
+                                },
+                                onDelete = {
+                                    expandedId = null
+                                    onDeleteCheck(entry.check.id)
+                                },
+                            )
+
+                            is HistoryEntry.Record -> {
+                                val transaction = entry.transaction
+                                TransactionListItem(
+                                    transaction = transaction,
+                                    zone = zone,
+                                    bankLabel = state.bankNames[transaction.bankId],
+                                    expanded = expandedId == entry.key,
+                                    onToggle = {
+                                        expandedId =
+                                            if (expandedId == entry.key) null else entry.key
+                                    },
+                                    onEdit = {
+                                        expandedId = null
+                                        onEdit(transaction.id)
+                                    },
+                                    onDelete = {
+                                        expandedId = null
+                                        onDelete(transaction.id)
+                                        scope.launch {
+                                            val result = snackbarHostState.showSnackbar(
+                                                message = "Catatan dihapus",
+                                                actionLabel = "Urungkan",
+                                                withDismissAction = true,
+                                                duration = SnackbarDuration.Long,
+                                            )
+                                            if (result == SnackbarResult.ActionPerformed) {
+                                                onRestore(transaction.id)
+                                            }
+                                        }
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }

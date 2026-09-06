@@ -22,6 +22,7 @@ class MoneyTrackerApp : Application() {
             database.transactionDao(),
             database.openingBalanceDao(),
             database.bankDao(),
+            database.balanceCheckDao(),
         )
     }
 

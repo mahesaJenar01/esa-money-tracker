@@ -24,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AccountBalance
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -41,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.BankBalance
 import com.esa.moneytracker.data.model.BankClosure
 import com.esa.moneytracker.data.model.BankColor
@@ -51,6 +54,9 @@ import com.esa.moneytracker.ui.components.IconBadge
 import com.esa.moneytracker.ui.components.SoftCard
 import com.esa.moneytracker.ui.theme.MoneyTheme
 import com.esa.moneytracker.util.CurrencyFormatter
+import com.esa.moneytracker.util.IndonesianDates
+import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * What the Online pocket is actually made of.
@@ -68,6 +74,7 @@ fun BanksScreen(
     onCorrectBalance: (String, Long, Long) -> Unit,
     onCloseBank: (String, String, BankClosure) -> Unit,
     onDismissMessage: () -> Unit,
+    onCheckBalance: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var dialog by remember { mutableStateOf<BankDialog>(BankDialog.None) }
@@ -101,6 +108,8 @@ fun BanksScreen(
                 item("total") {
                     Column(Modifier.padding(horizontal = 16.dp)) {
                         TotalCard(state)
+                        Spacer(Modifier.height(12.dp))
+                        LastCheckCard(state, onCheckBalance)
                         state.message?.let { message ->
                             Spacer(Modifier.height(12.dp))
                             MessageRow(message, onDismissMessage)
@@ -475,4 +484,85 @@ private fun EmptyBanks(modifier: Modifier = Modifier) {
             modifier = Modifier.padding(horizontal = 16.dp),
         )
     }
+}
+
+
+/**
+ * When the banks were last held up against reality, and the way to do it again.
+ *
+ * It sits directly under the total because this page is where the checking
+ * actually happens: the figures being compared are the ones listed below it.
+ * The count of notes since is the useful half — it is the exact stretch of
+ * history a new discrepancy has to be hiding in.
+ */
+@Composable
+private fun LastCheckCard(state: BanksUiState, onCheckBalance: () -> Unit) {
+    val colors = MoneyTheme.colors
+    val check = state.lastCheck
+    val zone = remember { ZoneId.systemDefault() }
+    val today = remember { LocalDate.now(zone) }
+    val tint = when {
+        check == null -> colors.muted
+        check.matched -> colors.income
+        else -> colors.expense
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(colors.surfaceElevated)
+            .border(1.dp, colors.hairline, RoundedCornerShape(18.dp))
+            .clickable(onClick = onCheckBalance)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconBadge(icon = Icons.Rounded.Bookmark, tint = tint, size = 38.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = if (check == null) {
+                    "Belum pernah cek saldo"
+                } else {
+                    "Terakhir dicek " +
+                        IndonesianDates.sinceLabel(check.dateIn(zone), today).lowercase()
+                },
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = checkSubtitle(state, check, zone),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Icon(
+            imageVector = Icons.Rounded.ChevronRight,
+            contentDescription = "Cek saldo dan tandai",
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+private fun checkSubtitle(
+    state: BanksUiState,
+    check: BalanceCheck?,
+    zone: ZoneId,
+): String {
+    if (check == null) {
+        return "Cocokkan saldo tiap bank dengan saldo aslinya, lalu tandai " +
+            "sampai di sini."
+    }
+
+    val stamp = IndonesianDates.dayAndDate(check.dateIn(zone)) + " • " +
+        IndonesianDates.time(check.dateTimeIn(zone))
+    val since = when (state.recordsSinceCheck) {
+        0 -> "belum ada catatan baru"
+        1 -> "1 catatan sejak itu"
+        else -> state.recordsSinceCheck.toString() + " catatan sejak itu"
+    }
+    return stamp + " • " + since
 }

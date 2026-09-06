@@ -31,6 +31,10 @@ rupiah.
   destroying it. The bin says how long each note has left and puts it back in the
   exact position it was deleted from; a snackbar offers the same undo right after
   a delete.
+- **Cek saldo** — the weekly reconciliation. It asks what each bank *really*
+  holds, next to what the app worked out, offers to write the gap into the
+  history as an ordinary note, and leaves a line across Riwayat where it was
+  done. See [Marking where the balances were checked](#marking-where-the-balances-were-checked).
 - **Analytics** — a period picker that currently offers **Mingguan** (weekly).
   The card shows income, expense, the difference, and a per-category breakdown of
   spending in that window.
@@ -53,7 +57,8 @@ rupiah.
 ```
 app/src/main/java/com/esa/moneytracker/
 ├── data/
-│   ├── model/        Transaction, TransactionType, Pocket, Category, Bank, OnlinePocket
+│   ├── model/        Transaction, TransactionType, Pocket, Category, Bank,
+│   │                 OnlinePocket, BalanceCheck
 │   ├── local/        Room entities, DAOs, database and its migrations
 │   ├── repository/   TransactionRepository — the only way in or out of storage
 │   └── export/       BackupDocument, TransactionExportRecord, ExportFormat
@@ -62,6 +67,7 @@ app/src/main/java/com/esa/moneytracker/
 │   ├── components/   reusable pieces (balance header, rows, badges, form fields)
 │   ├── setup/        the opening-balance question and the gate that shows it
 │   ├── banks/        the bank page and every dialog that changes one
+│   ├── check/        cek saldo — the reconciliation that leaves a mark
 │   ├── backup/       data & cadangan — export, import, document reading
 │   ├── home/         home screen, its sections, HomeViewModel
 │   ├── entry/        the three-step input flow, EntryViewModel
@@ -148,6 +154,69 @@ that one column and the note reappears exactly where it was — there is no
 re-insert and no new id. Rows are removed for good only once they have been in
 the bin for 30 days, which is swept on launch and whenever the bin is opened.
 
+## Marking where the balances were checked
+
+A transaction that is never written down does not announce itself. It shows up
+weeks later as a bank saying one number and the app saying another, with no way
+to tell *when* the two stopped agreeing — so the search is the whole history
+rather than the week that actually contains the mistake.
+
+**Cek saldo** is the answer to that. It asks, once per open bank and once for
+Tunai, what the pocket really holds. Every row is optional: a bank left blank was
+not counted and gets no line in the record, which keeps the mark an honest
+account of what was actually verified rather than a claim about everything.
+
+Where the two figures disagree, the screen offers to close the gap by writing an
+ordinary note — **Pendapatan Lainnya** when the bank holds more than the app knew
+about, **Lainnya** when it holds less, described as `Selisih saldo <bank>`. That
+is deliberately a note and not a bank correction: a correction hides inside the
+bank's arithmetic, while a forgotten transaction is history, and history belongs
+in Riwayat where it can be found, edited, or deleted once it is remembered. The
+switch can be turned off per bank, for a gap worth hunting down before it is
+papered over.
+
+Saving draws a line across Riwayat at the moment of the check:
+
+```
+        ──────  Saldo dicek • 20:14  ──────
+              4 kantong dicek, semuanya cocok
+```
+
+The line is the point of the whole feature. **Everything above it has not been
+checked against a bank yet**; everything below it was true when it was drawn. A
+total that stops matching next week is therefore a transaction somewhere in the
+stretch above the newest line, not somewhere in a year of records.
+
+Tapping the line opens what it recorded: per bank, what the app thought it held
+and what the bank said, the gap, and whether that gap was written down. The bank
+names are copied into the record rather than looked up, so renaming or closing a
+bank later never makes an old check illegible.
+
+### Where the notes land
+
+A note written to close a gap is dated to the check itself, which puts it
+**below** the line. That is the grammar of the thing: it explains something that
+happened in the stretch that was just verified, not in the unchecked stretch that
+starts above. In a tie on the clock the mark sorts above the note, which is what
+makes that true.
+
+Deleting a mark deletes only the mark. Any note it wrote stays exactly where it
+is, because that note is a claim about money that moved — removing it would
+quietly change every balance since. It can be deleted on its own from Riwayat if
+it really was wrong.
+
+### Where it is reached from
+
+The bank page carries the button, under the total, because that is where the
+figures being compared are listed; the card there says when the last check was
+and how many notes have been written since — the exact stretch a new gap would be
+hiding in. Riwayat lengkap carries the same button, next to the bin, and says the
+same thing above the week it is showing.
+
+Nothing is backfilled on upgrade. A mark says somebody sat down and compared the
+app against a bank, and there is no honest way to invent one for a week nobody
+checked — so an install has no marks until the first check is made.
+
 ## Adding monthly and yearly analytics
 
 `util/AnalyticsPeriod.kt` is an enum where each constant owns its own date range:
@@ -174,17 +243,22 @@ anywhere else.
 
 | Format | Contains | Importable |
 | --- | --- | --- |
-| `.json` | opening balances, banks **and** every live note | yes |
+| `.json` | opening balances, banks, the balance checks **and** every live note | yes |
 | `.csv` | one row per note, nothing else | no — for spreadsheets |
 
 Importing **merges by id**: a note already on file is replaced by the version in
 the backup and anything new is added, so importing the same file twice leaves the
-same result rather than a doubled history. Banks merge the same way. The opening
+same result rather than a doubled history. Banks and balance checks merge the
+same way — a restored history that had forgotten where it was last reconciled
+would send you back through every week of it. The opening
 balance in the file replaces the current one — restoring a backup that did not
 restore the starting balances would leave every total wrong. Notes in the 30-day
 bin are not exported; closed banks are, because live notes still point at them.
 
-**Old files still work.** A format-version 1 file predates banks: it carries the
+**Old files still work.** A file written before format version 3 carries no
+balance checks, which means the backup predates the mark rather than that the
+checks were lost — nothing is ever removed on import, only merged in. A
+format-version 1 file predates banks: it carries the
 whole online balance as one figure and names no bank on any note. It is accepted
 and converted rather than refused — the figure and the notes are folded into a
 single bank, exactly as an in-place upgrade does, and the import message says
@@ -203,9 +277,14 @@ screen is gating on, so the app moves straight on with the restored data.
 ### The shapes involved
 
 - `BackupDocument` is the file: `app`, `format_version`, `exported_at`, the
-  opening balance, the banks, and the transactions. Unknown JSON keys are ignored
+  opening balance, the banks, the transactions, and the balance checks. Unknown JSON keys are ignored
   on read, so a file written by a later version still loads what it can, and a
   missing `banks` array is what marks a file as pre-bank.
+- `BalanceCheckExportRecord` is one reconciliation, with its per-bank lines
+  nested inside it rather than in a second array — a check without its lines says
+  almost nothing, and the two halves are written and read as one. Its lines are
+  replaced wholesale on import rather than merged one by one, so a check cannot
+  end up carrying a line from an older version of itself.
 - `BankExportRecord` is one bank. It carries the opening amount and the
   corrections rather than the balance, because the balance is derived from notes
   in the same file and storing it too would let the two disagree after a merge.

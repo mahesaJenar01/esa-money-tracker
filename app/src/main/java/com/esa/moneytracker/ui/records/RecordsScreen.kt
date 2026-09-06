@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.EventNote
+import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.DeleteSweep
@@ -46,11 +48,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.esa.moneytracker.ui.components.BalanceCheckMark
 import com.esa.moneytracker.ui.components.SoftCard
 import com.esa.moneytracker.ui.components.TransactionListItem
 import com.esa.moneytracker.ui.home.DayGroup
+import com.esa.moneytracker.ui.home.HistoryEntry
 import com.esa.moneytracker.ui.theme.MoneyTheme
 import com.esa.moneytracker.util.CurrencyFormatter
+import com.esa.moneytracker.util.IndonesianDates
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 
@@ -66,7 +71,9 @@ fun RecordsScreen(
     onEdit: (String) -> Unit,
     onDelete: (String) -> Unit,
     onRestore: (String) -> Unit,
+    onDeleteCheck: (String) -> Unit,
     onOpenBin: () -> Unit,
+    onCheckBalance: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val zone = remember { ZoneId.systemDefault() }
@@ -88,7 +95,12 @@ fun RecordsScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            RecordsTopBar(binCount = state.binCount, onBack = onBack, onOpenBin = onOpenBin)
+            RecordsTopBar(
+                binCount = state.binCount,
+                onBack = onBack,
+                onOpenBin = onOpenBin,
+                onCheckBalance = onCheckBalance,
+            )
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -106,45 +118,63 @@ fun RecordsScreen(
                         )
                         Spacer(Modifier.height(12.dp))
                         WeekSummary(state)
+                        Spacer(Modifier.height(10.dp))
+                        LastCheckLine(state, onCheckBalance)
                     }
                 }
 
                 state.days.forEach { day ->
                     item("day-" + day.date) { DayHeader(day) }
-                    items(day.items, key = { it.id }) { transaction ->
+                    items(day.items, key = { it.key }) { entry ->
                         Box(Modifier.padding(horizontal = 16.dp)) {
-                            TransactionListItem(
-                                transaction = transaction,
-                                zone = zone,
-                                bankLabel = state.bankNames[transaction.bankId],
-                                expanded = expandedId == transaction.id,
-                                onToggle = {
-                                    expandedId = if (expandedId == transaction.id) {
-                                        null
-                                    } else {
-                                        transaction.id
-                                    }
-                                },
-                                onEdit = {
-                                    expandedId = null
-                                    onEdit(transaction.id)
-                                },
-                                onDelete = {
-                                    expandedId = null
-                                    onDelete(transaction.id)
-                                    scope.launch {
-                                        val result = snackbarHostState.showSnackbar(
-                                            message = "Catatan dihapus",
-                                            actionLabel = "Urungkan",
-                                            withDismissAction = true,
-                                            duration = SnackbarDuration.Long,
-                                        )
-                                        if (result == SnackbarResult.ActionPerformed) {
-                                            onRestore(transaction.id)
-                                        }
-                                    }
-                                },
-                            )
+                            when (entry) {
+                                is HistoryEntry.Mark -> BalanceCheckMark(
+                                    check = entry.check,
+                                    zone = zone,
+                                    expanded = expandedId == entry.key,
+                                    onToggle = {
+                                        expandedId =
+                                            if (expandedId == entry.key) null else entry.key
+                                    },
+                                    onDelete = {
+                                        expandedId = null
+                                        onDeleteCheck(entry.check.id)
+                                    },
+                                )
+
+                                is HistoryEntry.Record -> {
+                                    val transaction = entry.transaction
+                                    TransactionListItem(
+                                        transaction = transaction,
+                                        zone = zone,
+                                        bankLabel = state.bankNames[transaction.bankId],
+                                        expanded = expandedId == entry.key,
+                                        onToggle = {
+                                            expandedId =
+                                                if (expandedId == entry.key) null else entry.key
+                                        },
+                                        onEdit = {
+                                            expandedId = null
+                                            onEdit(transaction.id)
+                                        },
+                                        onDelete = {
+                                            expandedId = null
+                                            onDelete(transaction.id)
+                                            scope.launch {
+                                                val result = snackbarHostState.showSnackbar(
+                                                    message = "Catatan dihapus",
+                                                    actionLabel = "Urungkan",
+                                                    withDismissAction = true,
+                                                    duration = SnackbarDuration.Long,
+                                                )
+                                                if (result == SnackbarResult.ActionPerformed) {
+                                                    onRestore(transaction.id)
+                                                }
+                                            }
+                                        },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -180,7 +210,12 @@ fun RecordsScreen(
 }
 
 @Composable
-private fun RecordsTopBar(binCount: Int, onBack: () -> Unit, onOpenBin: () -> Unit) {
+private fun RecordsTopBar(
+    binCount: Int,
+    onBack: () -> Unit,
+    onOpenBin: () -> Unit,
+    onCheckBalance: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -207,7 +242,33 @@ private fun RecordsTopBar(binCount: Int, onBack: () -> Unit, onOpenBin: () -> Un
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        RoundAction(
+            icon = Icons.Rounded.Bookmark,
+            description = "Cek saldo dan tandai",
+            onClick = onCheckBalance,
+        )
+        Spacer(Modifier.width(8.dp))
         BinButton(count = binCount, onClick = onOpenBin)
+    }
+}
+
+/** The bookmark button in the top bar, shaped like the bin button beside it. */
+@Composable
+private fun RoundAction(icon: ImageVector, description: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(MoneyTheme.colors.surfaceElevated)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = description,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 
@@ -378,6 +439,66 @@ private fun DayHeader(day: DayGroup) {
             text = CurrencyFormatter.signedRupiah(day.net),
             style = MaterialTheme.typography.labelMedium,
             color = if (day.net >= 0) MoneyTheme.colors.income else MoneyTheme.colors.expense,
+        )
+    }
+}
+
+/**
+ * Where the history was last reconciled, sitting above the week it belongs to.
+ *
+ * The marks themselves are scattered through the list a week at a time, so a
+ * page showing March cannot answer "when did I last check?" on its own. This
+ * line always can, and it is also the way into making a new check from here.
+ */
+@Composable
+private fun LastCheckLine(state: RecordsUiState, onCheckBalance: () -> Unit) {
+    val colors = MoneyTheme.colors
+    val check = state.lastCheck
+    val zone = remember { ZoneId.systemDefault() }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(colors.surfaceElevated)
+            .clickable(onClick = onCheckBalance)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Bookmark,
+            contentDescription = null,
+            tint = if (check == null) colors.muted else MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = if (check == null) {
+                    "Belum pernah cek saldo"
+                } else {
+                    "Terakhir dicek " +
+                        IndonesianDates.sinceLabel(check.dateIn(zone), state.today).lowercase()
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = if (check == null) {
+                    "Cocokkan catatan dengan saldo asli, lalu tandai sampai di sini."
+                } else {
+                    IndonesianDates.dayAndDate(check.dateIn(zone)) + " • " +
+                        IndonesianDates.time(check.dateTimeIn(zone))
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = "Cek",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
         )
     }
 }

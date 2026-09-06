@@ -21,6 +21,8 @@ import com.esa.moneytracker.ui.banks.BanksScreen
 import com.esa.moneytracker.ui.banks.BanksViewModel
 import com.esa.moneytracker.ui.bin.BinScreen
 import com.esa.moneytracker.ui.bin.BinViewModel
+import com.esa.moneytracker.ui.check.BalanceCheckScreen
+import com.esa.moneytracker.ui.check.BalanceCheckViewModel
 import com.esa.moneytracker.ui.edit.EditScreen
 import com.esa.moneytracker.ui.edit.EditViewModel
 import com.esa.moneytracker.ui.entry.EntryScreen
@@ -48,6 +50,9 @@ object Routes {
 
     /** The banks the Online pocket is made of. */
     const val BANKS = "banks"
+
+    /** Cek saldo — the reconciliation that leaves a mark in the history. */
+    const val CHECK = "balance-check"
 
     const val EDIT_ARG = "transactionId"
     const val EDIT = "edit/{$EDIT_ARG}"
@@ -110,6 +115,7 @@ private fun MainNavHost(
                 onEdit = { navController.navigate(Routes.edit(it)) },
                 onDelete = viewModel::delete,
                 onRestore = viewModel::restore,
+                onDeleteCheck = viewModel::deleteCheck,
                 onOpenRecords = { navController.navigate(Routes.RECORDS) },
                 onOpenBanks = { navController.navigate(Routes.BANKS) },
                 onOpenData = { navController.navigate(Routes.BACKUP) },
@@ -156,7 +162,9 @@ private fun MainNavHost(
                 onEdit = { navController.navigate(Routes.edit(it)) },
                 onDelete = viewModel::delete,
                 onRestore = viewModel::restore,
+                onDeleteCheck = viewModel::deleteCheck,
                 onOpenBin = { navController.navigate(Routes.BIN) },
+                onCheckBalance = { navController.navigate(Routes.CHECK) },
             )
         }
 
@@ -183,6 +191,30 @@ private fun MainNavHost(
                 onCorrectBalance = viewModel::correctBalance,
                 onCloseBank = viewModel::closeBank,
                 onDismissMessage = viewModel::dismissMessage,
+                onCheckBalance = { navController.navigate(Routes.CHECK) },
+            )
+        }
+
+        composable(Routes.CHECK) {
+            val viewModel: BalanceCheckViewModel = viewModel(factory = BalanceCheckViewModel.Factory)
+            val state by viewModel.state.collectAsStateWithLifecycle()
+
+            // Saving lands back wherever the check was started from — the bank
+            // page or the full history — and the new mark is already in both.
+            LaunchedEffect(state.saved) {
+                if (state.saved) navController.popBackStack()
+            }
+
+            BalanceCheckScreen(
+                state = state,
+                onBack = { navController.popBackStack() },
+                onBalanceChanged = viewModel::onBalanceChanged,
+                onClearBalance = viewModel::onClearBalance,
+                onRecordDifferenceChanged = viewModel::onRecordDifferenceChanged,
+                onNoteChanged = viewModel::onNoteChanged,
+                onCheckedAtChanged = viewModel::onCheckedAtChanged,
+                onResetCheckedAt = viewModel::resetCheckedAt,
+                onSubmit = viewModel::submit,
             )
         }
 

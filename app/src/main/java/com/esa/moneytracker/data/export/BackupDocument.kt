@@ -19,7 +19,8 @@ import java.time.format.DateTimeFormatter
  * Since format version 2 the Online opening balance lives in the banks, and
  * `opening_balance.online` is written as zero. A version 1 file has it the other
  * way round and no banks at all; the importer folds that figure into a single
- * bank so the restored total is the same number it was.
+ * bank so the restored total is the same number it was. Version 3 adds the
+ * balance checks — the marks left in the history by a reconciliation.
  *
  * [formatVersion] is the promise made to older files: readers must accept any
  * version they understand and ignore fields they do not, which is why the JSON
@@ -40,6 +41,15 @@ data class BackupDocument(
      */
     @SerialName("banks") val banks: List<BankExportRecord> = emptyList(),
     @SerialName("transactions") val transactions: List<TransactionExportRecord> = emptyList(),
+    /**
+     * Every reconciliation ever made, with the per-bank figures it recorded.
+     *
+     * Absent in a file written before format version 3, which simply means that
+     * backup predates the mark. An empty list is never read as "the checks were
+     * deleted": nothing is removed on import, only merged in.
+     */
+    @SerialName("balance_checks") val balanceChecks: List<BalanceCheckExportRecord> =
+        emptyList(),
 ) {
     /** True for a file written before banks existed. */
     val preBanks: Boolean get() = formatVersion < 2 || banks.isEmpty()
@@ -51,7 +61,7 @@ data class BackupDocument(
 
     companion object {
         const val APP_ID = "esa-money-tracker"
-        const val FORMAT_VERSION = 2
+        const val FORMAT_VERSION = 3
 
         private val json = Json {
             prettyPrint = true
@@ -63,6 +73,7 @@ data class BackupDocument(
             openingBalances: OpeningBalances,
             banks: List<BankExportRecord>,
             transactions: List<TransactionExportRecord>,
+            balanceChecks: List<BalanceCheckExportRecord>,
             zone: ZoneId,
             now: Instant = Instant.now(),
         ): BackupDocument = BackupDocument(
@@ -70,6 +81,7 @@ data class BackupDocument(
             openingBalance = OpeningBalanceRecord.from(openingBalances, zone),
             banks = banks,
             transactions = transactions,
+            balanceChecks = balanceChecks,
         )
 
         /** Null when the text is not JSON at all; check [recognised] after that. */

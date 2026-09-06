@@ -1,9 +1,13 @@
 package com.esa.moneytracker.data.repository
 
 import com.esa.moneytracker.data.export.BackupDocument
+import com.esa.moneytracker.data.export.BalanceCheckExportRecord
 import com.esa.moneytracker.data.export.BankExportRecord
 import com.esa.moneytracker.data.export.ImportResult
 import com.esa.moneytracker.data.export.TransactionExportRecord
+import com.esa.moneytracker.data.local.BalanceCheckDao
+import com.esa.moneytracker.data.local.BalanceCheckEntity
+import com.esa.moneytracker.data.local.BalanceCheckItemEntity
 import com.esa.moneytracker.data.local.BankDao
 import com.esa.moneytracker.data.local.BankEntity
 import com.esa.moneytracker.data.local.OpeningBalanceDao
@@ -12,6 +16,8 @@ import com.esa.moneytracker.data.local.TransactionDao
 import com.esa.moneytracker.data.local.TransactionEntity
 import com.esa.moneytracker.data.local.toDomain
 import com.esa.moneytracker.data.local.toEntity
+import com.esa.moneytracker.data.model.BalanceCheck
+import com.esa.moneytracker.data.model.BalanceCheckItem
 import com.esa.moneytracker.data.model.Bank
 import com.esa.moneytracker.data.model.BankClosure
 import com.esa.moneytracker.data.model.BankColor
@@ -28,6 +34,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.util.UUID
+import kotlin.math.abs
 
 /** A bank as the first-run screen collects it, before it has an id. */
 data class NewBank(
@@ -36,10 +43,38 @@ data class NewBank(
     val amount: Long,
 )
 
+/**
+ * One line of a reconciliation, as the check screen collects it.
+ *
+ * Only pockets the user actually counted are handed over — a bank left blank is
+ * simply not part of that check, which is a different thing from a bank that was
+ * counted and agreed.
+ */
+data class BalanceCheckEntry(
+    /** Which bank was counted, or null for Tunai. */
+    val bankId: String?,
+    val label: String,
+    /** What the app had worked out the pocket held, at the moment of the check. */
+    val appBalance: Long,
+    /** What the bank — or the wallet — actually said. */
+    val realBalance: Long,
+    /**
+     * Whether a gap should be written into the history as an ordinary note.
+     *
+     * True is the usual answer and is what makes the two figures agree again.
+     * False leaves the gap standing, for when the missing transaction is worth
+     * hunting down before it is papered over.
+     */
+    val recordDifference: Boolean = true,
+) {
+    val difference: Long get() = realBalance - appBalance
+}
+
 class TransactionRepository(
     private val dao: TransactionDao,
     private val openingBalanceDao: OpeningBalanceDao,
     private val bankDao: BankDao,
+    private val balanceCheckDao: BalanceCheckDao,
 ) {
 
     fun observeAll(): Flow<List<Transaction>> =
@@ -58,6 +93,25 @@ class TransactionRepository(
      */
     fun observeBanks(): Flow<List<Bank>> =
         bankDao.observeAll().map { rows -> rows.map { it.toDomain() } }
+
+    /**
+     * Every reconciliation, newest first, with its per-bank lines attached.
+     *
+     * The lines are read in one go and paired up here rather than through a
+     * Room relation: there are a handful of checks a year and a few lines each,
+     * so the join costs nothing in memory and saves a query per mark while the
+     * history list scrolls.
+     */
+    fun observeBalanceChecks(): Flow<List<BalanceCheck>> =
+        combine(
+            balanceCheckDao.observeAll(),
+            balanceCheckDao.observeAllItems(),
+        ) { checks, items ->
+            val byCheck = items.groupBy { it.checkId }
+            checks.map { check ->
+                check.toDomain(byCheck[check.id].orEmpty().map { it.toDomain() })
+            }
+        }
 
     fun observeOpeningBalances(): Flow<OpeningBalances> =
         openingBalanceDao.observeAll().map { rows -> rows.toOpeningBalances() }
@@ -319,6 +373,89 @@ class TransactionRepository(
         return target.name
     }
 
+    // ---------------------------------------------------------------- checks
+
+    /**
+     * Writes down a reconciliation, and closes the gaps it found.
+     *
+     * The mark itself never moves a rupiah. What can move one is [entries]: a
+     * line whose two figures disagree and that asked for it becomes an ordinary
+     * note — income when the pocket holds more than the app knew about, an
+     * expense when it holds less — which is exactly what makes the app agree
+     * with the bank again from that moment on.
+     *
+     * Those notes are dated to the check itself, so they land *below* the mark
+     * in the history. That is the whole grammar of the thing: everything above
+     * the mark is unverified, and a note explaining a gap belongs to the stretch
+     * that was just verified, not to the one that follows it.
+     *
+     * The note is a real, editable record with a category and a description. It
+     * is deliberately not a bank correction: a correction hides in the bank's
+     * arithmetic, whereas a forgotten transaction is history and belongs in
+     * Riwayat where it can be found, edited, or deleted once it is remembered.
+     */
+    suspend fun saveBalanceCheck(
+        entries: List<BalanceCheckEntry>,
+        note: String = "",
+        /** Null means "right now", which is what an untouched form says. */
+        checkedAt: Instant? = null,
+        now: Instant = Instant.now(),
+    ): BalanceCheck {
+        val at = checkedAt ?: now
+        val checkId = UUID.randomUUID().toString()
+
+        val items = entries.map { entry ->
+            val adjustment = if (entry.recordDifference && entry.difference != 0L) {
+                val income = entry.difference > 0L
+                add(
+                    type = if (income) TransactionType.INCOME else TransactionType.EXPENSE,
+                    pocket = if (entry.bankId == null) Pocket.CASH else Pocket.ONLINE,
+                    category = if (income) Category.PENDAPATAN_LAINNYA else Category.LAINNYA,
+                    bankId = entry.bankId,
+                    amount = abs(entry.difference),
+                    description = "Selisih saldo " + entry.label,
+                    occurredAt = at,
+                ).id
+            } else {
+                null
+            }
+
+            BalanceCheckItemEntity(
+                id = UUID.randomUUID().toString(),
+                checkId = checkId,
+                bank = entry.bankId,
+                label = entry.label,
+                appBalance = entry.appBalance,
+                realBalance = entry.realBalance,
+                adjustment = adjustment,
+            )
+        }
+
+        val check = BalanceCheckEntity(
+            id = checkId,
+            checkedAt = at.toEpochMilli(),
+            note = note.trim(),
+            createdAt = now.toEpochMilli(),
+        )
+        balanceCheckDao.upsert(check)
+        balanceCheckDao.upsertItems(items)
+
+        return check.toDomain(items.map { it.toDomain() })
+    }
+
+    /**
+     * Removes a mark.
+     *
+     * Only the mark. Any note it wrote to close a gap stays exactly where it is,
+     * because that note is a claim about money that moved, not about the check —
+     * deleting it would quietly change every balance since. It can be deleted on
+     * its own from Riwayat if it really was wrong.
+     */
+    suspend fun deleteBalanceCheck(id: String) {
+        balanceCheckDao.deleteItemsOf(id)
+        balanceCheckDao.delete(id)
+    }
+
     // ---------------------------------------------------------- export/import
 
     /**
@@ -339,15 +476,22 @@ class TransactionRepository(
      *
      * Binned notes are left out on purpose — the bin is a 30-day safety net for
      * this phone, not part of the history worth carrying to another one. Closed
-     * banks *are* included, because live notes still point at them.
+     * banks *are* included, because live notes still point at them, and so are
+     * the balance checks: a restored history that had forgotten where it was
+     * last reconciled would send the user back through every week of it.
      */
-    suspend fun exportBackup(zone: ZoneId = ZoneId.systemDefault()): BackupDocument =
-        BackupDocument.build(
+    suspend fun exportBackup(zone: ZoneId = ZoneId.systemDefault()): BackupDocument {
+        val items = balanceCheckDao.getAllItems().groupBy { it.checkId }
+        return BackupDocument.build(
             openingBalances = openingBalanceDao.getAll().toOpeningBalances(),
             banks = bankDao.getAll().map { BankExportRecord.from(it, zone) },
             transactions = exportSnapshot(zone),
+            balanceChecks = balanceCheckDao.getAll().map { check ->
+                BalanceCheckExportRecord.from(check, items[check.id].orEmpty(), zone)
+            },
             zone = zone,
         )
+    }
 
     /**
      * Writes a backup back into the database, merging by id.
@@ -375,6 +519,20 @@ class TransactionRepository(
 
         if (entities.isNotEmpty()) dao.upsertAll(entities)
 
+        // A check's lines are replaced wholesale rather than merged one by one:
+        // they are read as a set, and a merge could otherwise leave a line from
+        // an older version of the same check standing beside the new ones.
+        val checks = document.balanceChecks.mapNotNull { record ->
+            record.toEntity()?.let { it to record.itemEntities() }
+        }
+        if (checks.isNotEmpty()) {
+            balanceCheckDao.upsertAll(checks.map { it.first })
+            checks.forEach { (check, lines) ->
+                balanceCheckDao.deleteItemsOf(check.id)
+                if (lines.isNotEmpty()) balanceCheckDao.upsertItems(lines)
+            }
+        }
+
         val opening = document.openingBalance
         if (opening != null) {
             setOpeningBalances(
@@ -394,6 +552,7 @@ class TransactionRepository(
             skipped = skipped,
             openingBalanceApplied = opening != null,
             banksImported = banks.size,
+            checksImported = checks.size,
             foldedIntoBank = foldedInto.takeIf { document.preBanks },
         )
     }

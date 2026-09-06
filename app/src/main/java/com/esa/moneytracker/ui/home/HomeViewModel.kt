@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.esa.moneytracker.MoneyTrackerApp
+import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.Bank
 import com.esa.moneytracker.data.model.OpeningBalances
 import com.esa.moneytracker.data.model.Pocket
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.ZoneId
 
 class HomeViewModel(
@@ -37,9 +39,10 @@ class HomeViewModel(
             repository.observeAll(),
             repository.observeOpeningBalances(),
             repository.observeBanks(),
+            repository.observeBalanceChecks(),
             selectedPeriod,
-        ) { transactions, opening, banks, period ->
-            buildState(transactions, opening, banks, period)
+        ) { transactions, opening, banks, checks, period ->
+            buildState(transactions, opening, banks, checks, period)
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -59,10 +62,16 @@ class HomeViewModel(
         viewModelScope.launch { repository.restore(id) }
     }
 
+    /** Removes a mark. Any note it wrote to close a gap is left alone. */
+    fun deleteCheck(id: String) {
+        viewModelScope.launch { repository.deleteBalanceCheck(id) }
+    }
+
     private fun buildState(
         transactions: List<Transaction>,
         opening: OpeningBalances,
         banks: List<Bank>,
+        checks: List<BalanceCheck>,
         period: AnalyticsPeriod,
     ): HomeUiState {
         val today = LocalDate.now(zone)
@@ -103,6 +112,7 @@ class HomeViewModel(
         // time on the detailed page, so the home screen stays a summary.
         val week = WeekWindow.of(today)
         val thisWeek = transactions.filter { week.contains(it.dateIn(zone)) }
+        val checksThisWeek = checks.filter { week.contains(it.dateIn(zone)) }
 
         return HomeUiState(
             loading = false,
@@ -118,7 +128,7 @@ class HomeViewModel(
             periodCount = inPeriod.size,
             breakdown = breakdown,
             latest = transactions.firstOrNull(),
-            days = thisWeek.groupIntoDays(zone, today),
+            days = historyDays(thisWeek, checksThisWeek, zone, today),
             weekRangeLabel = week.rangeLabel,
             hasOlderRecords = thisWeek.size < transactions.size,
         )
@@ -134,15 +144,36 @@ class HomeViewModel(
     }
 }
 
-/** Newest day first, newest note first inside each day. */
-fun List<Transaction>.groupIntoDays(zone: ZoneId, today: LocalDate): List<DayGroup> =
-    groupBy { it.dateIn(zone) }
+/**
+ * Newest day first, newest entry first inside each day.
+ *
+ * Notes and balance-check marks are interleaved on one clock, and a mark wins a
+ * tie. That matters: closing a gap writes its note at the exact instant of the
+ * check, and the note belongs to the stretch that was just verified — below the
+ * line — not to the unchecked stretch that starts above it.
+ */
+fun historyDays(
+    transactions: List<Transaction>,
+    checks: List<BalanceCheck>,
+    zone: ZoneId,
+    today: LocalDate,
+): List<DayGroup> {
+    val entries: List<HistoryEntry> =
+        transactions.map(HistoryEntry::Record) + checks.map(HistoryEntry::Mark)
+
+    return entries
+        .groupBy { LocalDateTime.ofInstant(it.at, zone).toLocalDate() }
         .toSortedMap(reverseOrder())
         .map { (date, items) ->
             DayGroup(
                 date = date,
                 label = IndonesianDates.relativeDay(date, today),
-                net = items.sumOf { it.signedAmount },
-                items = items.sortedByDescending { it.occurredAt },
+                net = items.filterIsInstance<HistoryEntry.Record>()
+                    .sumOf { it.transaction.signedAmount },
+                items = items.sortedWith(
+                    compareByDescending<HistoryEntry> { it.at }
+                        .thenByDescending { it is HistoryEntry.Mark },
+                ),
             )
         }
+}

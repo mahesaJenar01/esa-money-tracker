@@ -2,6 +2,7 @@ package com.esa.moneytracker.util
 
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.temporal.ChronoUnit
 
 /**
  * Indonesian date labels, spelled out here rather than relying on the device
@@ -41,6 +42,25 @@ object IndonesianDates {
         today -> "Hari Ini"
         today.minusDays(1) -> "Kemarin"
         else -> dayAndDate(date)
+    }
+
+    /**
+     * How long ago something was, in the words a person would use.
+     *
+     * `"Hari ini"` / `"Kemarin"` / `"5 hari lalu"` / `"3 minggu lalu"`. Rounded
+     * down to the coarser unit once the number of days stops being easy to hold
+     * in your head, which is the point at which the exact count stops mattering.
+     */
+    fun sinceLabel(date: LocalDate, today: LocalDate): String {
+        val days = ChronoUnit.DAYS.between(date, today)
+        return when {
+            days < 0L -> dayAndDate(date)
+            days == 0L -> "Hari ini"
+            days == 1L -> "Kemarin"
+            days < 14L -> "$days hari lalu"
+            days < 60L -> "${days / 7} minggu lalu"
+            else -> "${days / 30} bulan lalu"
+        }
     }
 
     /** `"14:35"` */

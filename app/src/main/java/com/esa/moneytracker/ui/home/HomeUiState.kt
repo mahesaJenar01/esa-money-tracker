@@ -1,16 +1,45 @@
 package com.esa.moneytracker.ui.home
 
+import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.Category
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.util.AnalyticsPeriod
+import java.time.Instant
 import java.time.LocalDate
+
+/**
+ * One thing that shows up in the history list.
+ *
+ * The list is not purely a list of notes any more: a balance check leaves a mark
+ * in it, sitting at the moment it was made. Both kinds are ordered by the same
+ * clock, which is what lets the mark mean "everything above this has not been
+ * checked against a bank yet" rather than just "a check happened that day".
+ */
+sealed interface HistoryEntry {
+    /** Unique across both kinds, so a LazyColumn key never collides. */
+    val key: String
+
+    /** Where this sits in the history. */
+    val at: Instant
+
+    data class Record(val transaction: Transaction) : HistoryEntry {
+        override val key: String get() = "note-" + transaction.id
+        override val at: Instant get() = transaction.occurredAt
+    }
+
+    data class Mark(val check: BalanceCheck) : HistoryEntry {
+        override val key: String get() = "check-" + check.id
+        override val at: Instant get() = check.checkedAt
+    }
+}
 
 /** One day's worth of entries, as rendered in the history list. */
 data class DayGroup(
     val date: LocalDate,
     val label: String,
+    /** Notes only — a mark never moves money, so it never moves this figure. */
     val net: Long,
-    val items: List<Transaction>,
+    val items: List<HistoryEntry>,
 )
 
 /** One row of the period's spending breakdown. */

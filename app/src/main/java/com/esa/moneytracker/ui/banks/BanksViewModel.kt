@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.esa.moneytracker.MoneyTrackerApp
 import com.esa.moneytracker.data.local.BankEntity
+import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.BankClosure
 import com.esa.moneytracker.data.model.BankColor
 import com.esa.moneytracker.data.model.BankFunding
@@ -24,6 +25,10 @@ import kotlinx.coroutines.launch
 data class BanksUiState(
     val loading: Boolean = true,
     val pocket: OnlinePocket = OnlinePocket(),
+    /** The most recent reconciliation, or null while there has never been one. */
+    val lastCheck: BalanceCheck? = null,
+    /** Notes written since that check — the stretch a new gap would hide in. */
+    val recordsSinceCheck: Int = 0,
     val busy: Boolean = false,
     /** The last thing that happened, shown as a banner and then dismissed. */
     val message: String? = null,
@@ -64,9 +69,21 @@ class BanksViewModel(
         combine(
             repository.observeBanks(),
             repository.observeAll(),
+            repository.observeBalanceChecks(),
             local,
-        ) { banks, transactions, current ->
-            current.copy(loading = false, pocket = onlinePocketOf(banks, transactions))
+        ) { banks, transactions, checks, current ->
+            val last = checks.maxByOrNull { it.checkedAt }
+            current.copy(
+                loading = false,
+                pocket = onlinePocketOf(banks, transactions),
+                lastCheck = last,
+                // Counted by when the money moved, not by when the note was
+                // written: a purchase backdated to before the check was part of
+                // the stretch that check verified, however late it was typed in.
+                recordsSinceCheck = last?.let { check ->
+                    transactions.count { it.occurredAt.isAfter(check.checkedAt) }
+                } ?: transactions.size,
+            )
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),

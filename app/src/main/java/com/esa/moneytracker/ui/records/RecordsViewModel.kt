@@ -6,11 +6,12 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.esa.moneytracker.MoneyTrackerApp
+import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.data.model.TransactionType
 import com.esa.moneytracker.data.repository.TransactionRepository
 import com.esa.moneytracker.ui.home.DayGroup
-import com.esa.moneytracker.ui.home.groupIntoDays
+import com.esa.moneytracker.ui.home.historyDays
 import com.esa.moneytracker.util.WeekWindow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -36,6 +37,9 @@ data class RecordsUiState(
 
     /** Bank id to name, so a history row can say where the money moved. */
     val bankNames: Map<String, String> = emptyMap(),
+
+    /** The most recent reconciliation, for the line under the title. */
+    val lastCheck: BalanceCheck? = null,
 
     /** False at the oldest week that holds anything, so paging has an end. */
     val canGoOlder: Boolean = false,
@@ -67,9 +71,16 @@ class RecordsViewModel(
             repository.observeAll(),
             repository.observeDeleted(),
             repository.observeBanks(),
+            repository.observeBalanceChecks(),
             week,
-        ) { transactions, deleted, banks, window ->
-            buildState(transactions, deleted.size, banks.associate { it.id to it.name }, window)
+        ) { transactions, deleted, banks, checks, window ->
+            buildState(
+                transactions = transactions,
+                checks = checks,
+                binCount = deleted.size,
+                bankNames = banks.associate { it.id to it.name },
+                window = window,
+            )
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -92,26 +103,40 @@ class RecordsViewModel(
         viewModelScope.launch { repository.restore(id) }
     }
 
+    /** Removes a mark. Any note it wrote to close a gap is left alone. */
+    fun deleteCheck(id: String) {
+        viewModelScope.launch { repository.deleteBalanceCheck(id) }
+    }
+
     private fun buildState(
         transactions: List<Transaction>,
+        checks: List<BalanceCheck>,
         binCount: Int,
         bankNames: Map<String, String>,
         window: WeekWindow,
     ): RecordsUiState {
         val today = LocalDate.now(zone)
         val inWeek = transactions.filter { window.contains(it.dateIn(zone)) }
-        val oldest = transactions.minOfOrNull { it.dateIn(zone) }
+        val checksInWeek = checks.filter { window.contains(it.dateIn(zone)) }
+
+        // A week holding nothing but a mark is still a week worth paging back
+        // to, so the oldest thing on file is the older of the two.
+        val oldest = minOf(
+            transactions.minOfOrNull { it.dateIn(zone) } ?: LocalDate.MAX,
+            checks.minOfOrNull { it.dateIn(zone) } ?: LocalDate.MAX,
+        ).takeIf { it != LocalDate.MAX }
 
         return RecordsUiState(
             loading = false,
             today = today,
             week = window,
-            days = inWeek.groupIntoDays(zone, today),
+            days = historyDays(inWeek, checksInWeek, zone, today),
             income = inWeek.filter { it.type == TransactionType.INCOME }.sumOf { it.amount },
             expense = inWeek.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount },
             count = inWeek.size,
             binCount = binCount,
             bankNames = bankNames,
+            lastCheck = checks.maxByOrNull { it.checkedAt },
             canGoOlder = oldest != null && oldest.isBefore(window.start),
             canGoNewer = window.start.isBefore(WeekWindow.of(today).start),
         )
