@@ -37,6 +37,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.esa.moneytracker.ui.components.TransactionRow
+import com.esa.moneytracker.ui.components.TransferRow
 import com.esa.moneytracker.ui.theme.MoneyTheme
 import com.esa.moneytracker.util.IndonesianDates
 import kotlinx.coroutines.launch
@@ -52,7 +53,7 @@ import java.time.ZoneId
 fun BinScreen(
     state: BinUiState,
     onBack: () -> Unit,
-    onRestore: (String) -> Unit,
+    onRestore: (BinnedItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val zone = remember { ZoneId.systemDefault() }
@@ -101,12 +102,13 @@ fun BinScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             ) {
-                items(state.records, key = { it.transaction.id }) { record ->
+                items(state.items, key = { it.key }) { item ->
                     BinRow(
-                        record = record,
+                        item = item,
+                        state = state,
                         zone = zone,
                         onRestore = {
-                            onRestore(record.transaction.id)
+                            onRestore(item)
                             scope.launch {
                                 snackbarHostState.showSnackbar(
                                     message = "Catatan dipulihkan",
@@ -156,15 +158,31 @@ fun BinScreen(
 
 @Composable
 private fun BinRow(
-    record: BinnedRecord,
+    item: BinnedItem,
+    state: BinUiState,
     zone: ZoneId,
     onRestore: () -> Unit,
 ) {
     val colors = MoneyTheme.colors
-    val deleted = record.transaction.deletedDateTimeIn(zone)
+    val deleted = item.deletedAt?.let { java.time.LocalDateTime.ofInstant(it, zone) }
 
     Column(Modifier.padding(bottom = 8.dp)) {
-        TransactionRow(transaction = record.transaction, zone = zone, dimmed = true)
+        when (item) {
+            is BinnedItem.Note -> TransactionRow(
+                transaction = item.transaction,
+                zone = zone,
+                bankLabel = item.transaction.bankId?.let { state.bankNames[it] },
+                dimmed = true,
+            )
+
+            is BinnedItem.Move -> TransferRow(
+                transfer = item.transfer,
+                bankNames = state.bankNames,
+                bankColors = state.bankColors,
+                zone = zone,
+                dimmed = true,
+            )
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -181,13 +199,13 @@ private fun BinRow(
                     )
                 }
                 Text(
-                    text = when (record.daysLeft) {
+                    text = when (item.daysLeft) {
                         0L -> "Hilang permanen hari ini"
                         1L -> "Sisa 1 hari"
-                        else -> "Sisa " + record.daysLeft + " hari"
+                        else -> "Sisa " + item.daysLeft + " hari"
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (record.daysLeft <= 3L) colors.expense else colors.muted,
+                    color = if (item.daysLeft <= 3L) colors.expense else colors.muted,
                 )
             }
 

@@ -11,6 +11,8 @@ import com.esa.moneytracker.data.model.BankColor
 import com.esa.moneytracker.data.model.OpeningBalances
 import com.esa.moneytracker.data.model.Pocket
 import com.esa.moneytracker.data.model.Transaction
+import com.esa.moneytracker.data.model.Transfer
+import com.esa.moneytracker.data.model.cashBalanceOf
 import com.esa.moneytracker.data.model.onlinePocketOf
 import com.esa.moneytracker.data.repository.BalanceCheckEntry
 import com.esa.moneytracker.data.repository.TransactionRepository
@@ -114,12 +116,21 @@ class BalanceCheckViewModel(
     val state: StateFlow<BalanceCheckUiState> =
         combine(
             repository.observeBanks(),
-            repository.observeAll(),
+            // Paired up because `combine` takes five flows and this needs six.
+            // A check compares the app against the world, so it has to count
+            // every rupiah a transfer moved as well as every one recorded.
+            combine(
+                repository.observeAll(),
+                repository.observeTransfers(),
+            ) { transactions, transfers -> transactions to transfers },
             repository.observeOpeningBalances(),
             inputs,
             form,
-        ) { banks, transactions, opening, typed, current ->
-            current.copy(loading = false, rows = rowsOf(banks, transactions, opening, typed))
+        ) { banks, (transactions, transfers), opening, typed, current ->
+            current.copy(
+                loading = false,
+                rows = rowsOf(banks, transactions, transfers, opening, typed),
+            )
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -208,10 +219,11 @@ class BalanceCheckViewModel(
     private fun rowsOf(
         banks: List<Bank>,
         transactions: List<Transaction>,
+        transfers: List<Transfer>,
         opening: OpeningBalances,
         typed: Map<String, Input>,
     ): List<CheckRow> {
-        val online = onlinePocketOf(banks, transactions).banks.map { bank ->
+        val online = onlinePocketOf(banks, transactions, transfers).banks.map { bank ->
             val input = typed[bank.id] ?: Input()
             CheckRow(
                 id = bank.id,
@@ -230,9 +242,7 @@ class BalanceCheckViewModel(
             bankId = null,
             label = Pocket.CASH.label,
             color = null,
-            appBalance = opening.cash + transactions
-                .filter { it.pocket == Pocket.CASH }
-                .sumOf { it.signedAmount },
+            appBalance = cashBalanceOf(opening.cash, transactions, transfers),
             digits = cashInput.digits,
             recordDifference = cashInput.record,
         )

@@ -170,6 +170,9 @@ suspend fun runImport(
         if (result.added > 0) add(result.added.toString() + " catatan ditambahkan")
         if (result.updated > 0) add(result.updated.toString() + " catatan diperbarui")
         if (result.banksImported > 0) add(result.banksImported.toString() + " bank dipulihkan")
+        if (result.transfersImported > 0) {
+            add(result.transfersImported.toString() + " pindah dana dipulihkan")
+        }
         if (result.checksImported > 0) {
             add(result.checksImported.toString() + " penanda cek saldo dipulihkan")
         }

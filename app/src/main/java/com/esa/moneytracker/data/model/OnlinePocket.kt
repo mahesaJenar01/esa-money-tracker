@@ -23,18 +23,28 @@ data class OnlinePocket(
 ) {
     val total: Long get() = banks.sumOf { it.balance } + unassigned
 
-    val hasUnassigned: Boolean get() = unassignedCount > 0 || unassigned != 0L
+    val hasUnassigned: Boolean get() = unassignedCount != 0 || unassigned != 0L
 }
 
 /**
  * Works out what each open bank holds, and what the Online pocket holds in all.
  *
- * A closed bank is left out on both counts: closing one is how the app is told
- * the money is no longer there, so its balance *and* the notes recorded against
- * it stop counting. Those notes stay visible in Riwayat — history is never
+ * Two things move a bank's balance and both are counted here: notes recorded
+ * against it, and transfers in or out of it. A transfer is not income or
+ * expense — it leaves the app's totals alone — but it certainly moves money
+ * between banks, and a breakdown that ignored it would stop adding up the first
+ * time money was shifted.
+ *
+ * A closed bank is left out on every count: closing one is how the app is told
+ * the money is no longer there, so its balance, its notes *and* its transfers
+ * stop counting. Those notes stay visible in Riwayat — history is never
  * rewritten — they simply no longer add up to a balance that does not exist.
  */
-fun onlinePocketOf(banks: List<Bank>, transactions: List<Transaction>): OnlinePocket {
+fun onlinePocketOf(
+    banks: List<Bank>,
+    transactions: List<Transaction>,
+    transfers: List<Transfer> = emptyList(),
+): OnlinePocket {
     val open = banks.filterNot { it.archived }
     val byBank = transactions
         .filter { it.pocket == Pocket.ONLINE }
@@ -44,8 +54,11 @@ fun onlinePocketOf(banks: List<Bank>, transactions: List<Transaction>): OnlinePo
         val notes = byBank[bank.id].orEmpty()
         BankBalance(
             bank = bank,
-            balance = bank.baseBalance + notes.sumOf { it.signedAmount },
+            balance = bank.baseBalance +
+                notes.sumOf { it.signedAmount } +
+                transfers.sumOf { it.effectOn(bank.id) },
             recordCount = notes.size,
+            transferCount = transfers.count { it.touches(bank.id) },
         )
     }
 
@@ -56,3 +69,23 @@ fun onlinePocketOf(banks: List<Bank>, transactions: List<Transaction>): OnlinePo
         unassignedCount = homeless.size,
     )
 }
+
+/**
+ * What the wallet holds: the opening figure, every cash note, and every rupiah
+ * carried in or out of it by a transfer.
+ *
+ * Kept beside [onlinePocketOf] so the two pockets are worked out the same way
+ * and in one place. A deposit taking money out of the wallet and a withdrawal
+ * putting it back are the same row read from opposite ends.
+ */
+fun cashBalanceOf(
+    openingCash: Long,
+    transactions: List<Transaction>,
+    transfers: List<Transfer> = emptyList(),
+): Long = openingCash +
+    transactions.filter { it.pocket == Pocket.CASH }.sumOf { it.signedAmount } +
+    transfers.sumOf { it.effectOn(null) }
+
+/** True when either end of the transfer is this pocket. */
+private fun Transfer.touches(bankId: String?): Boolean =
+    fromBankId == bankId || toBankId == bankId

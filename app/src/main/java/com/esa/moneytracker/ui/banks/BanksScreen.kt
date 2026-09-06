@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -75,6 +76,7 @@ fun BanksScreen(
     onCloseBank: (String, String, BankClosure) -> Unit,
     onDismissMessage: () -> Unit,
     onCheckBalance: () -> Unit,
+    onOpenTransfers: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var dialog by remember { mutableStateOf<BankDialog>(BankDialog.None) }
@@ -110,6 +112,8 @@ fun BanksScreen(
                         TotalCard(state)
                         Spacer(Modifier.height(12.dp))
                         LastCheckCard(state, onCheckBalance)
+                        Spacer(Modifier.height(12.dp))
+                        TransfersLink(state.transferCount, onOpenTransfers)
                         state.message?.let { message ->
                             Spacer(Modifier.height(12.dp))
                             MessageRow(message, onDismissMessage)
@@ -210,6 +214,58 @@ fun BanksScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * The way into Pindah Dana, sitting where the question comes up.
+ *
+ * Looking at what each bank holds is exactly the moment someone notices one is
+ * short and another is not, so the answer to that belongs on this page rather
+ * than buried in a menu.
+ */
+@Composable
+private fun TransfersLink(count: Int, onClick: () -> Unit) {
+    val colors = MoneyTheme.colors
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(colors.surfaceElevated)
+            .border(1.dp, colors.hairline, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconBadge(
+            icon = Icons.Rounded.SwapHoriz,
+            tint = MaterialTheme.colorScheme.primary,
+            size = 38.dp,
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "Pindah dana",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = when (count) {
+                    0 -> "Pindahkan saldo antar bank, atau ke dan dari tunai"
+                    1 -> "1 catatan perpindahan"
+                    else -> count.toString() + " catatan perpindahan"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(
+            imageVector = Icons.Rounded.ChevronRight,
+            contentDescription = null,
+            tint = colors.muted,
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 

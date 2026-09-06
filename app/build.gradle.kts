@@ -122,4 +122,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     debugImplementation(libs.androidx.ui.tooling)
+
+    // The balance arithmetic is plain Kotlin with no Android in it, which is
+    // what makes "money is only ever moved, never created" testable at all.
+    testImplementation(libs.junit)
 }

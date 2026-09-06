@@ -10,6 +10,8 @@ data class ImportResult(
     val banksImported: Int = 0,
     /** Reconciliation marks restored, so the history knows where it was last checked. */
     val checksImported: Int = 0,
+    /** Moves between pockets restored, so the money is in the right banks. */
+    val transfersImported: Int = 0,
     /**
      * The bank a pre-bank file's Online balance was folded into, when that
      * happened, so the screen can say the data has been moved onto the new

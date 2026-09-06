@@ -5,6 +5,7 @@ import com.esa.moneytracker.data.export.BalanceCheckExportRecord
 import com.esa.moneytracker.data.export.BankExportRecord
 import com.esa.moneytracker.data.export.ImportResult
 import com.esa.moneytracker.data.export.TransactionExportRecord
+import com.esa.moneytracker.data.export.TransferExportRecord
 import com.esa.moneytracker.data.local.BalanceCheckDao
 import com.esa.moneytracker.data.local.BalanceCheckEntity
 import com.esa.moneytracker.data.local.BalanceCheckItemEntity
@@ -14,6 +15,7 @@ import com.esa.moneytracker.data.local.OpeningBalanceDao
 import com.esa.moneytracker.data.local.OpeningBalanceEntity
 import com.esa.moneytracker.data.local.TransactionDao
 import com.esa.moneytracker.data.local.TransactionEntity
+import com.esa.moneytracker.data.local.TransferDao
 import com.esa.moneytracker.data.local.toDomain
 import com.esa.moneytracker.data.local.toEntity
 import com.esa.moneytracker.data.model.BalanceCheck
@@ -27,6 +29,7 @@ import com.esa.moneytracker.data.model.OpeningBalances
 import com.esa.moneytracker.data.model.Pocket
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.data.model.TransactionType
+import com.esa.moneytracker.data.model.Transfer
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -75,6 +78,7 @@ class TransactionRepository(
     private val openingBalanceDao: OpeningBalanceDao,
     private val bankDao: BankDao,
     private val balanceCheckDao: BalanceCheckDao,
+    private val transferDao: TransferDao,
 ) {
 
     fun observeAll(): Flow<List<Transaction>> =
@@ -112,6 +116,21 @@ class TransactionRepository(
                 check.toDomain(byCheck[check.id].orEmpty().map { it.toDomain() })
             }
         }
+
+    /**
+     * Every live move between your own pockets, newest first.
+     *
+     * Kept apart from [observeAll] on purpose. A transfer earns and spends
+     * nothing, so it has no business in the list of notes, in the analytics, or
+     * in "catatan terakhir" — but it decides which bank holds the money, so the
+     * balance calculation cannot do without it.
+     */
+    fun observeTransfers(): Flow<List<Transfer>> =
+        transferDao.observeAll().map { rows -> rows.map { it.toDomain() } }
+
+    /** The bin, transfers half: deleted moves still inside their 30 days. */
+    fun observeDeletedTransfers(): Flow<List<Transfer>> =
+        transferDao.observeDeleted().map { rows -> rows.map { it.toDomain() } }
 
     fun observeOpeningBalances(): Flow<OpeningBalances> =
         openingBalanceDao.observeAll().map { rows -> rows.toOpeningBalances() }
@@ -250,10 +269,10 @@ class TransactionRepository(
     suspend fun restore(id: String) = dao.restore(id)
 
     /** Clears out anything that has sat in the bin for more than 30 days. */
-    suspend fun purgeExpiredDeleted(now: Instant = Instant.now()): Int =
-        dao.purgeDeletedBefore(
-            now.minus(Duration.ofDays(TransactionEntity.RETENTION_DAYS)).toEpochMilli(),
-        )
+    suspend fun purgeExpiredDeleted(now: Instant = Instant.now()): Int {
+        val cutoff = now.minus(Duration.ofDays(TransactionEntity.RETENTION_DAYS)).toEpochMilli()
+        return dao.purgeDeletedBefore(cutoff) + transferDao.purgeDeletedBefore(cutoff)
+    }
 
     // ------------------------------------------------------------------ banks
 
@@ -321,6 +340,13 @@ class TransactionRepository(
         val bank = bankDao.findById(id) ?: return
         if (closure is BankClosure.MoveTo && closure.targetBankId != id) {
             dao.reassignBank(fromBankId = id, toBankId = closure.targetBankId)
+            // Transfers follow the money for the same reason the notes do. A
+            // move between the closed bank and its destination collapses into a
+            // row pointing at itself, which is worth nothing and is dropped —
+            // the two ends cancelled out, so no balance changes by removing it.
+            transferDao.reassignSource(fromBankId = id, toBankId = closure.targetBankId)
+            transferDao.reassignDestination(fromBankId = id, toBankId = closure.targetBankId)
+            transferDao.dropSelfTransfers()
             bankDao.addAdjustment(
                 id = closure.targetBankId,
                 delta = bank.openingBalance + bank.adjustment,
@@ -456,6 +482,77 @@ class TransactionRepository(
         balanceCheckDao.delete(id)
     }
 
+    // -------------------------------------------------------------- transfers
+
+    suspend fun findTransfer(id: String): Transfer? = transferDao.findById(id)?.toDomain()
+
+    /**
+     * Records money moved from one of your pockets to another.
+     *
+     * Returns null rather than writing nonsense: a move needs two different
+     * ends and a positive amount. Nothing here touches income or expense — the
+     * two ends cancel out, so the total across every pocket is the same rupiah
+     * before and after.
+     */
+    suspend fun addTransfer(
+        fromBankId: String?,
+        toBankId: String?,
+        amount: Long,
+        note: String,
+        /** Null means "right now", and is what makes an untouched move say so. */
+        occurredAt: Instant? = null,
+    ): Transfer? {
+        if (fromBankId == toBankId || amount <= 0L) return null
+        // One Instant for both stamps when the time was not chosen, so
+        // Transfer.timeAdjusted is an exact comparison rather than a guess.
+        val now = Instant.now()
+        val transfer = Transfer(
+            id = UUID.randomUUID().toString(),
+            fromBankId = fromBankId,
+            toBankId = toBankId,
+            amount = amount,
+            note = note.trim(),
+            occurredAt = occurredAt ?: now,
+            createdAt = now,
+        )
+        transferDao.upsert(transfer.toEntity())
+        return transfer
+    }
+
+    /**
+     * Rewrites a transfer in place, leaving it where it sits in the history.
+     *
+     * Same rule as a note: [Transfer.occurredAt] only moves when the user moves
+     * it, and the edit leaves [Transfer.updatedAt] behind instead.
+     */
+    suspend fun updateTransfer(
+        original: Transfer,
+        fromBankId: String?,
+        toBankId: String?,
+        amount: Long,
+        note: String,
+        occurredAt: Instant = original.occurredAt,
+        now: Instant = Instant.now(),
+    ): Transfer? {
+        if (fromBankId == toBankId || amount <= 0L) return null
+        val updated = original.copy(
+            fromBankId = fromBankId,
+            toBankId = toBankId,
+            amount = amount,
+            note = note.trim(),
+            occurredAt = occurredAt,
+            updatedAt = now,
+        )
+        transferDao.upsert(updated.toEntity())
+        return updated
+    }
+
+    /** Moves a transfer to the bin; the money goes back where it came from. */
+    suspend fun deleteTransfer(id: String, now: Instant = Instant.now()) =
+        transferDao.softDelete(id, now.toEpochMilli())
+
+    suspend fun restoreTransfer(id: String) = transferDao.restore(id)
+
     // ---------------------------------------------------------- export/import
 
     /**
@@ -482,12 +579,16 @@ class TransactionRepository(
      */
     suspend fun exportBackup(zone: ZoneId = ZoneId.systemDefault()): BackupDocument {
         val items = balanceCheckDao.getAllItems().groupBy { it.checkId }
+        val bankNames = bankDao.getAll().associate { it.id to it.name }
         return BackupDocument.build(
             openingBalances = openingBalanceDao.getAll().toOpeningBalances(),
             banks = bankDao.getAll().map { BankExportRecord.from(it, zone) },
             transactions = exportSnapshot(zone),
             balanceChecks = balanceCheckDao.getAll().map { check ->
                 BalanceCheckExportRecord.from(check, items[check.id].orEmpty(), zone)
+            },
+            transfers = transferDao.getAllOnce().map {
+                TransferExportRecord.from(it, zone, bankNames)
             },
             zone = zone,
         )
@@ -544,6 +645,12 @@ class TransactionRepository(
             )
         }
 
+        // Merged by id like everything else. A file older than format version 4
+        // simply has none, which is not the same as "they were deleted": an
+        // import only ever adds and replaces.
+        val transfers = document.transfers.mapNotNull { it.toEntity() }
+        if (transfers.isNotEmpty()) transferDao.upsertAll(transfers)
+
         val foldedInto = normaliseBanks()
 
         return ImportResult(
@@ -553,6 +660,7 @@ class TransactionRepository(
             openingBalanceApplied = opening != null,
             banksImported = banks.size,
             checksImported = checks.size,
+            transfersImported = transfers.size,
             foldedIntoBank = foldedInto.takeIf { document.preBanks },
         )
     }

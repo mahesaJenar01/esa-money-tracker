@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -73,6 +74,7 @@ import java.time.LocalDateTime
 fun EntryScreen(
     state: EntryUiState,
     onChooseType: (TransactionType) -> Unit,
+    onChooseTransfer: () -> Unit,
     onChooseCategory: (Category) -> Unit,
     onChoosePocket: (Pocket) -> Unit,
     onChooseBank: (String) -> Unit,
@@ -110,7 +112,7 @@ fun EntryScreen(
                 modifier = Modifier.fillMaxSize(),
             ) { step ->
                 when (step) {
-                    EntryStep.TYPE -> TypeStep(onChooseType)
+                    EntryStep.TYPE -> TypeStep(onChooseType, onChooseTransfer)
                     EntryStep.CATEGORY -> CategoryStep(state, onChooseCategory)
                     EntryStep.DETAILS -> DetailsStep(
                         state = state,
@@ -187,7 +189,10 @@ private fun EntryTopBar(state: EntryUiState, onBack: () -> Unit) {
 }
 
 @Composable
-private fun TypeStep(onChoose: (TransactionType) -> Unit) {
+private fun TypeStep(
+    onChoose: (TransactionType) -> Unit,
+    onChooseTransfer: () -> Unit,
+) {
     val colors = MoneyTheme.colors
 
     Column(
@@ -219,6 +224,40 @@ private fun TypeStep(onChoose: (TransactionType) -> Unit) {
             tint = colors.expense,
             container = colors.expenseContainer,
             onClick = { onChoose(TransactionType.EXPENSE) },
+        )
+
+        // Deliberately neither green nor red, and set apart by the divider: this
+        // one is not money coming or going, and the card should not suggest it.
+        Spacer(Modifier.height(2.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(1.dp)
+                    .background(colors.hairline),
+            )
+            Text(
+                text = "atau",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.muted,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(1.dp)
+                    .background(colors.hairline),
+            )
+        }
+
+        TypeCard(
+            title = "Pindah Dana",
+            subtitle = "Antar bank, setor tunai, atau tarik tunai — " +
+                "total saldomu tidak berubah",
+            icon = Icons.Rounded.SwapHoriz,
+            tint = MaterialTheme.colorScheme.primary,
+            container = MaterialTheme.colorScheme.primaryContainer,
+            onClick = onChooseTransfer,
         )
     }
 }

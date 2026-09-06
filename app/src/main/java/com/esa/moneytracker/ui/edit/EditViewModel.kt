@@ -49,10 +49,11 @@ class EditViewModel(
             form,
             repository.observeBanks(),
             repository.observeAll(),
-        ) { current, banks, transactions ->
+            repository.observeTransfers(),
+        ) { current, banks, transactions, transfers ->
             // Balances, not bare names: the picker is also where a bank gets
             // created, and that dialog has to say what the other banks hold.
-            val open = onlinePocketOf(banks, transactions).banks
+            val open = onlinePocketOf(banks, transactions, transfers).banks
             current.copy(
                 banks = open,
                 bankId = current.bankId?.takeIf { id -> open.any { it.id == id } }

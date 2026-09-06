@@ -67,6 +67,8 @@ data class BankBalance(
     val balance: Long,
     /** How many live notes were recorded against it. */
     val recordCount: Int,
+    /** How many live transfers move money in or out of it. */
+    val transferCount: Int = 0,
 ) {
     val id: String get() = bank.id
     val name: String get() = bank.name

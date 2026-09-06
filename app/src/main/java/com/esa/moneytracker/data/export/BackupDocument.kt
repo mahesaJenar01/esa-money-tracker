@@ -50,6 +50,15 @@ data class BackupDocument(
      */
     @SerialName("balance_checks") val balanceChecks: List<BalanceCheckExportRecord> =
         emptyList(),
+    /**
+     * Every move of money between your own pockets.
+     *
+     * Absent before format version 4. Restoring them matters as much as
+     * restoring the notes: a transfer changes nothing about how much money
+     * exists, but everything about which bank holds it, so a backup without
+     * them would put the right total in the wrong places.
+     */
+    @SerialName("transfers") val transfers: List<TransferExportRecord> = emptyList(),
 ) {
     /** True for a file written before banks existed. */
     val preBanks: Boolean get() = formatVersion < 2 || banks.isEmpty()
@@ -61,7 +70,7 @@ data class BackupDocument(
 
     companion object {
         const val APP_ID = "esa-money-tracker"
-        const val FORMAT_VERSION = 3
+        const val FORMAT_VERSION = 4
 
         private val json = Json {
             prettyPrint = true
@@ -74,6 +83,7 @@ data class BackupDocument(
             banks: List<BankExportRecord>,
             transactions: List<TransactionExportRecord>,
             balanceChecks: List<BalanceCheckExportRecord>,
+            transfers: List<TransferExportRecord>,
             zone: ZoneId,
             now: Instant = Instant.now(),
         ): BackupDocument = BackupDocument(
@@ -82,6 +92,7 @@ data class BackupDocument(
             banks = banks,
             transactions = transactions,
             balanceChecks = balanceChecks,
+            transfers = transfers,
         )
 
         /** Null when the text is not JSON at all; check [recognised] after that. */

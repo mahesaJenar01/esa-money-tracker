@@ -34,6 +34,10 @@ import com.esa.moneytracker.ui.records.RecordsViewModel
 import com.esa.moneytracker.ui.setup.SetupGate
 import com.esa.moneytracker.ui.setup.SetupScreen
 import com.esa.moneytracker.ui.setup.SetupViewModel
+import com.esa.moneytracker.ui.transfer.TransferScreen
+import com.esa.moneytracker.ui.transfer.TransferViewModel
+import com.esa.moneytracker.ui.transfer.TransfersScreen
+import com.esa.moneytracker.ui.transfer.TransfersViewModel
 
 object Routes {
     const val HOME = "home"
@@ -53,6 +57,17 @@ object Routes {
 
     /** Cek saldo — the reconciliation that leaves a mark in the history. */
     const val CHECK = "balance-check"
+
+    /** Riwayat pindah dana — kept apart from Riwayat on purpose. */
+    const val TRANSFERS = "transfers"
+
+    /** The Pindah Dana form, for a move that does not exist yet. */
+    const val TRANSFER_NEW = "transfer-new"
+
+    const val TRANSFER_ARG = "transferId"
+    const val TRANSFER_EDIT = "transfer-edit/{$TRANSFER_ARG}"
+
+    fun transferEdit(transferId: String): String = "transfer-edit/$transferId"
 
     const val EDIT_ARG = "transactionId"
     const val EDIT = "edit/{$EDIT_ARG}"
@@ -137,6 +152,13 @@ private fun MainNavHost(
             EntryScreen(
                 state = state,
                 onChooseType = viewModel::chooseType,
+                // Pindah Dana leaves the Catat flow rather than continuing it:
+                // it asks none of the questions the remaining steps ask.
+                onChooseTransfer = {
+                    navController.navigate(Routes.TRANSFER_NEW) {
+                        popUpTo(Routes.ENTRY) { inclusive = true }
+                    }
+                },
                 onChooseCategory = viewModel::chooseCategory,
                 onChoosePocket = viewModel::choosePocket,
                 onChooseBank = viewModel::chooseBank,
@@ -192,6 +214,7 @@ private fun MainNavHost(
                 onCloseBank = viewModel::closeBank,
                 onDismissMessage = viewModel::dismissMessage,
                 onCheckBalance = { navController.navigate(Routes.CHECK) },
+                onOpenTransfers = { navController.navigate(Routes.TRANSFERS) },
             )
         }
 
@@ -215,6 +238,34 @@ private fun MainNavHost(
                 onCheckedAtChanged = viewModel::onCheckedAtChanged,
                 onResetCheckedAt = viewModel::resetCheckedAt,
                 onSubmit = viewModel::submit,
+            )
+        }
+
+        composable(Routes.TRANSFERS) {
+            val viewModel: TransfersViewModel = viewModel(factory = TransfersViewModel.Factory)
+            val state by viewModel.state.collectAsStateWithLifecycle()
+
+            TransfersScreen(
+                state = state,
+                onBack = { navController.popBackStack() },
+                onAdd = { navController.navigate(Routes.TRANSFER_NEW) },
+                onEdit = { navController.navigate(Routes.transferEdit(it)) },
+                onDelete = viewModel::delete,
+                onRestore = viewModel::restore,
+            )
+        }
+
+        composable(Routes.TRANSFER_NEW) {
+            TransferRoute(navController = navController, transferId = null)
+        }
+
+        composable(
+            route = Routes.TRANSFER_EDIT,
+            arguments = listOf(navArgument(Routes.TRANSFER_ARG) { type = NavType.StringType }),
+        ) { entry ->
+            TransferRoute(
+                navController = navController,
+                transferId = entry.arguments?.getString(Routes.TRANSFER_ARG).orEmpty(),
             )
         }
 
@@ -262,4 +313,39 @@ private fun MainNavHost(
             )
         }
     }
+}
+
+/**
+ * The Pindah Dana form, whether it is filling in a new move or fixing an old
+ * one. Both routes land here because the questions are identical; only the
+ * starting answers differ.
+ */
+@Composable
+private fun TransferRoute(
+    navController: NavHostController,
+    transferId: String?,
+) {
+    val viewModel: TransferViewModel = viewModel(
+        key = "transfer-" + (transferId ?: "new"),
+        factory = TransferViewModel.factory(transferId),
+    )
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    LaunchedEffect(state.saved) {
+        if (state.saved) navController.popBackStack()
+    }
+
+    TransferScreen(
+        state = state,
+        onChooseFrom = viewModel::chooseFrom,
+        onChooseTo = viewModel::chooseTo,
+        onSwap = viewModel::swapEnds,
+        onAmountChanged = viewModel::onAmountChanged,
+        onUseWholeBalance = viewModel::useWholeBalance,
+        onNoteChanged = viewModel::onNoteChanged,
+        onOccurredAtChanged = viewModel::onOccurredAtChanged,
+        onResetOccurredAt = viewModel::resetOccurredAt,
+        onBack = { navController.popBackStack() },
+        onSubmit = viewModel::submit,
+    )
 }

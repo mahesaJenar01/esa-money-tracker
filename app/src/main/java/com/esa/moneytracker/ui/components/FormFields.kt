@@ -118,12 +118,15 @@ fun DescriptionField(
     modifier: Modifier = Modifier,
     isError: Boolean = false,
     errorText: String? = null,
+    placeholder: String = "Contoh: makan siang di kantin",
+    /** What the field says when it is not complaining. */
+    helperText: String = "Wajib diisi.",
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChanged,
         modifier = modifier.fillMaxWidth(),
-        placeholder = { Text("Contoh: makan siang di kantin") },
+        placeholder = { Text(placeholder) },
         keyboardOptions = KeyboardOptions(
             capitalization = KeyboardCapitalization.Sentences,
             imeAction = ImeAction.Done,
@@ -131,7 +134,7 @@ fun DescriptionField(
         minLines = 2,
         isError = isError,
         supportingText = {
-            if (isError && errorText != null) Text(errorText) else Text("Wajib diisi.")
+            if (isError && errorText != null) Text(errorText) else Text(helperText)
         },
         shape = RoundedCornerShape(18.dp),
         colors = moneyFieldColors(),

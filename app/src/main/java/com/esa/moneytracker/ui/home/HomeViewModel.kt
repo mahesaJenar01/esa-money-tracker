@@ -9,9 +9,10 @@ import com.esa.moneytracker.MoneyTrackerApp
 import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.Bank
 import com.esa.moneytracker.data.model.OpeningBalances
-import com.esa.moneytracker.data.model.Pocket
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.data.model.TransactionType
+import com.esa.moneytracker.data.model.Transfer
+import com.esa.moneytracker.data.model.cashBalanceOf
 import com.esa.moneytracker.data.model.onlinePocketOf
 import com.esa.moneytracker.data.repository.TransactionRepository
 import com.esa.moneytracker.util.AnalyticsPeriod
@@ -36,13 +37,19 @@ class HomeViewModel(
 
     val state: StateFlow<HomeUiState> =
         combine(
-            repository.observeAll(),
+            // Paired up because `combine` takes five flows and this needs six.
+            // Notes and transfers are read together anyway: every balance on
+            // this screen is worked out from both.
+            combine(
+                repository.observeAll(),
+                repository.observeTransfers(),
+            ) { transactions, transfers -> transactions to transfers },
             repository.observeOpeningBalances(),
             repository.observeBanks(),
             repository.observeBalanceChecks(),
             selectedPeriod,
-        ) { transactions, opening, banks, checks, period ->
-            buildState(transactions, opening, banks, checks, period)
+        ) { (transactions, transfers), opening, banks, checks, period ->
+            buildState(transactions, transfers, opening, banks, checks, period)
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -69,6 +76,7 @@ class HomeViewModel(
 
     private fun buildState(
         transactions: List<Transaction>,
+        transfers: List<Transfer>,
         opening: OpeningBalances,
         banks: List<Bank>,
         checks: List<BalanceCheck>,
@@ -79,11 +87,9 @@ class HomeViewModel(
         // Online is never a figure of its own: it is whatever the open banks add
         // up to, so the tile and the bank page can never disagree. Cash is still
         // the opening amount plus every rupiah recorded against it.
-        val onlinePocket = onlinePocketOf(banks, transactions)
+        val onlinePocket = onlinePocketOf(banks, transactions, transfers)
         val online = onlinePocket.total
-        val cash = opening.cash + transactions
-            .filter { it.pocket == Pocket.CASH }
-            .sumOf { it.signedAmount }
+        val cash = cashBalanceOf(opening.cash, transactions, transfers)
 
         val inPeriod = transactions.filter { period.contains(it.dateIn(zone), today) }
         val periodIncome = inPeriod.filter { it.type == TransactionType.INCOME }.sumOf { it.amount }

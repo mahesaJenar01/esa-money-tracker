@@ -14,8 +14,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BankEntity::class,
         BalanceCheckEntity::class,
         BalanceCheckItemEntity::class,
+        TransferEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class MoneyDatabase : RoomDatabase() {
@@ -27,6 +28,8 @@ abstract class MoneyDatabase : RoomDatabase() {
     abstract fun bankDao(): BankDao
 
     abstract fun balanceCheckDao(): BalanceCheckDao
+
+    abstract fun transferDao(): TransferDao
 
     companion object {
         /**
@@ -190,6 +193,51 @@ abstract class MoneyDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v5 adds moving money between your own pockets.
+         *
+         * A table of its own rather than another `transactions.type`: a transfer
+         * changes where money sits, not how much there is, and keeping the two
+         * apart is what stops it ever reaching an income or expense total.
+         *
+         * Purely additive, so nothing existing has to be rewritten — an install
+         * that upgrades has no transfers yet, and every balance stays exactly
+         * what it was.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `transfers` (" +
+                        "`id` TEXT NOT NULL, " +
+                        "`from_bank` TEXT, " +
+                        "`to_bank` TEXT, " +
+                        "`amount` INTEGER NOT NULL, " +
+                        "`note` TEXT NOT NULL, " +
+                        "`occurred_at` INTEGER NOT NULL, " +
+                        "`created_at` INTEGER NOT NULL, " +
+                        "`updated_at` INTEGER, " +
+                        "`deleted_at` INTEGER, " +
+                        "PRIMARY KEY(`id`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_transfers_occurred_at` " +
+                        "ON `transfers` (`occurred_at`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_transfers_from_bank` " +
+                        "ON `transfers` (`from_bank`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_transfers_to_bank` " +
+                        "ON `transfers` (`to_bank`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_transfers_deleted_at` " +
+                        "ON `transfers` (`deleted_at`)"
+                )
+            }
+        }
+
         @Volatile
         private var instance: MoneyDatabase? = null
 
@@ -200,7 +248,7 @@ abstract class MoneyDatabase : RoomDatabase() {
                     MoneyDatabase::class.java,
                     NAME,
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { instance = it }
             }

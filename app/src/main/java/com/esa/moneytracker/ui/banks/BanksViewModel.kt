@@ -30,6 +30,8 @@ data class BanksUiState(
     /** Notes written since that check — the stretch a new gap would hide in. */
     val recordsSinceCheck: Int = 0,
     val busy: Boolean = false,
+    /** How many moves between pockets have been recorded, for the link. */
+    val transferCount: Int = 0,
     /** The last thing that happened, shown as a banner and then dismissed. */
     val message: String? = null,
 ) {
@@ -70,12 +72,14 @@ class BanksViewModel(
             repository.observeBanks(),
             repository.observeAll(),
             repository.observeBalanceChecks(),
+            repository.observeTransfers(),
             local,
-        ) { banks, transactions, checks, current ->
+        ) { banks, transactions, checks, transfers, current ->
             val last = checks.maxByOrNull { it.checkedAt }
             current.copy(
                 loading = false,
-                pocket = onlinePocketOf(banks, transactions),
+                pocket = onlinePocketOf(banks, transactions, transfers),
+                transferCount = transfers.size,
                 lastCheck = last,
                 // Counted by when the money moved, not by when the note was
                 // written: a purchase backdated to before the check was part of
