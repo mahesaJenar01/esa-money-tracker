@@ -70,6 +70,8 @@ fun HomeScreen(
     onDelete: (String) -> Unit,
     onRestore: (String) -> Unit,
     onDeleteCheck: (String) -> Unit,
+    /** Opens the viewer on one note's picture, by note id and position. */
+    onOpenAttachment: (String, Int) -> Unit,
     onOpenRecords: () -> Unit,
     onOpenBanks: () -> Unit,
     onOpenData: () -> Unit,
@@ -185,6 +187,10 @@ fun HomeScreen(
                                     transaction = transaction,
                                     zone = zone,
                                     bankLabel = state.bankNames[transaction.bankId],
+                                    attachments = state.attachments[transaction.id].orEmpty(),
+                                    onOpenAttachment = { index ->
+                                        onOpenAttachment(transaction.id, index)
+                                    },
                                     expanded = expandedId == entry.key,
                                     onToggle = {
                                         expandedId =

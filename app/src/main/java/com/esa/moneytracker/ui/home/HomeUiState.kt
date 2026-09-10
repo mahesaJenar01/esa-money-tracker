@@ -1,5 +1,6 @@
 package com.esa.moneytracker.ui.home
 
+import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.Category
 import com.esa.moneytracker.data.model.Transaction
@@ -64,6 +65,8 @@ data class HomeUiState(
     val bankCount: Int = 0,
     /** Bank id to name, so a history row can say where the money moved. */
     val bankNames: Map<String, String> = emptyMap(),
+    /** Note id to its pictures, so a row can show the struk it carries. */
+    val attachments: Map<String, List<Attachment>> = emptyMap(),
 
     val periodIncome: Long = 0,
     val periodExpense: Long = 0,

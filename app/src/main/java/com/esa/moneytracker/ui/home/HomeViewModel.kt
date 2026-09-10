@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.esa.moneytracker.MoneyTrackerApp
+import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.Bank
 import com.esa.moneytracker.data.model.OpeningBalances
@@ -37,19 +38,23 @@ class HomeViewModel(
 
     val state: StateFlow<HomeUiState> =
         combine(
-            // Paired up because `combine` takes five flows and this needs six.
-            // Notes and transfers are read together anyway: every balance on
-            // this screen is worked out from both.
+            // Grouped up because `combine` takes five flows and this needs
+            // seven. Notes, transfers and lampiran all hang off the same list:
+            // every balance on this screen is worked out from the first two, and
+            // the third is what the rows draw.
             combine(
                 repository.observeAll(),
                 repository.observeTransfers(),
-            ) { transactions, transfers -> transactions to transfers },
+                repository.observeAttachments(),
+            ) { transactions, transfers, attachments ->
+                Triple(transactions, transfers, attachments)
+            },
             repository.observeOpeningBalances(),
             repository.observeBanks(),
             repository.observeBalanceChecks(),
             selectedPeriod,
-        ) { (transactions, transfers), opening, banks, checks, period ->
-            buildState(transactions, transfers, opening, banks, checks, period)
+        ) { (transactions, transfers, attachments), opening, banks, checks, period ->
+            buildState(transactions, transfers, attachments, opening, banks, checks, period)
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -77,6 +82,7 @@ class HomeViewModel(
     private fun buildState(
         transactions: List<Transaction>,
         transfers: List<Transfer>,
+        attachments: Map<String, List<Attachment>>,
         opening: OpeningBalances,
         banks: List<Bank>,
         checks: List<BalanceCheck>,
@@ -129,6 +135,7 @@ class HomeViewModel(
             cashBalance = cash,
             bankCount = onlinePocket.banks.size,
             bankNames = banks.associate { it.id to it.name },
+            attachments = attachments,
             periodIncome = periodIncome,
             periodExpense = periodExpense,
             periodCount = inPeriod.size,

@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.ui.theme.MoneyTheme
 import com.esa.moneytracker.util.IndonesianDates
@@ -43,6 +44,9 @@ import java.time.ZoneId
  * and **Ubah** and **Hapus** appear directly underneath. All three belong to the
  * same gesture because they answer the same question — "what is this entry,
  * really?" — and none of them is worth a screen of its own.
+ *
+ * Pictures answer the same question too, so they are here as well: a small one
+ * in the row itself, and the whole set at a readable size once it is opened.
  */
 @Composable
 fun TransactionListItem(
@@ -53,6 +57,9 @@ fun TransactionListItem(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
     bankLabel: String? = null,
+    attachments: List<Attachment> = emptyList(),
+    /** Opens the full-screen viewer at the picture that was tapped. */
+    onOpenAttachment: ((Int) -> Unit)? = null,
     zone: ZoneId = ZoneId.systemDefault(),
 ) {
     val colors = MoneyTheme.colors
@@ -64,6 +71,8 @@ fun TransactionListItem(
             bankLabel = bankLabel,
             selected = expanded,
             expanded = expanded,
+            attachments = attachments,
+            onOpenAttachment = onOpenAttachment,
             onClick = onToggle,
         )
 
@@ -73,6 +82,15 @@ fun TransactionListItem(
             exit = fadeOut() + shrinkVertically(),
         ) {
             Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
+                if (attachments.isNotEmpty()) {
+                    // Large enough that a shop name and a total are already
+                    // readable here, so most receipts never need the viewer.
+                    AttachmentStrip(
+                        attachments = attachments,
+                        onOpen = onOpenAttachment,
+                        modifier = Modifier.padding(bottom = 10.dp),
+                    )
+                }
                 transactionNotes(transaction, zone).forEach { note ->
                     Text(
                         text = note,

@@ -1,11 +1,14 @@
 package com.esa.moneytracker.ui.entry
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.esa.moneytracker.MoneyTrackerApp
+import com.esa.moneytracker.data.attachment.AttachmentImport
+import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.BankColor
 import com.esa.moneytracker.data.model.BankFunding
 import com.esa.moneytracker.data.model.Category
@@ -20,6 +23,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import java.time.LocalDateTime
 import java.time.ZoneId
 
@@ -100,6 +104,61 @@ class EntryViewModel(
         }
     }
 
+    /**
+     * Turns a picked photo or PDF into pictures, and stages them.
+     *
+     * The work happens now rather than at submit because it is the slow part —
+     * a twelve-megapixel photo has to be decoded and shrunk, and an invoice has
+     * to be rendered page by page. Doing it here means the wait lands while the
+     * form is still being filled in, and the save stays instant.
+     */
+    fun addAttachment(uri: Uri) = stage { repository.stageAttachment(uri, allowance()) }
+
+    /** The same, for a photo the camera has just taken. */
+    fun addCapture(file: File) = stage { repository.stageCapture(file) }
+
+    /** Takes a staged picture back off, file and all. */
+    fun removeAttachment(id: String) {
+        val gone = form.value.attachments.filter { it.id == id }
+        if (gone.isEmpty()) return
+        repository.discardStaged(gone)
+        form.update { current ->
+            current.copy(attachments = current.attachments.filterNot { it.id == id })
+        }
+    }
+
+    fun dismissAttachmentMessage() = form.update { it.copy(attachmentMessage = null) }
+
+    private fun allowance(): Int =
+        Attachment.MAX_PER_TRANSACTION - form.value.attachments.size
+
+    private fun stage(block: suspend () -> AttachmentImport) {
+        if (form.value.attachmentBusy) return
+        form.update { it.copy(attachmentBusy = true, attachmentMessage = null) }
+        viewModelScope.launch {
+            val result = block()
+            form.update { current ->
+                when (result) {
+                    is AttachmentImport.Added -> current.copy(
+                        attachmentBusy = false,
+                        attachments = current.attachments + result.drafts,
+                        attachmentMessage = if (result.pagesLeftOut > 0) {
+                            "Hanya " + result.drafts.size + " halaman pertama yang diambil; " +
+                                result.pagesLeftOut + " halaman sisanya dilewati."
+                        } else {
+                            null
+                        },
+                    )
+
+                    is AttachmentImport.Failed -> current.copy(
+                        attachmentBusy = false,
+                        attachmentMessage = result.message,
+                    )
+                }
+            }
+        }
+    }
+
     /** Returns true when there was a previous step to go back to. */
     fun back(): Boolean {
         val current = form.value
@@ -124,7 +183,7 @@ class EntryViewModel(
 
         form.update { it.copy(saving = true, showErrors = true) }
         viewModelScope.launch {
-            repository.add(
+            val saved = repository.add(
                 type = type,
                 pocket = current.pocket,
                 category = category,
@@ -136,6 +195,10 @@ class EntryViewModel(
                 // backdating mark it did not earn.
                 occurredAt = current.occurredAt?.atZone(zone)?.toInstant(),
             )
+            // Only now do the staged pictures get a note to belong to. Written
+            // after the note itself, so a lampiran can never point at a record
+            // that failed to save.
+            repository.attach(saved.id, current.attachments)
             form.update { it.copy(saving = false, saved = true) }
         }
     }

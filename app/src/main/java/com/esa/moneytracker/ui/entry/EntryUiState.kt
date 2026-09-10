@@ -1,5 +1,8 @@
 package com.esa.moneytracker.ui.entry
 
+import com.esa.moneytracker.data.attachment.AttachmentDraft
+import com.esa.moneytracker.data.attachment.asPreview
+import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.BankBalance
 import com.esa.moneytracker.data.model.BankColor
 import com.esa.moneytracker.data.model.Category
@@ -45,6 +48,20 @@ data class EntryUiState(
     /** Captured when the flow opened, so "Sekarang" has something to show. */
     val nowStamp: LocalDateTime = LocalDateTime.now(),
 
+    /**
+     * Pictures already on disk, waiting for a note to belong to.
+     *
+     * They are written the moment they are picked rather than at submit, so
+     * shrinking a photo or rendering an invoice happens while the rest of the
+     * form is still being filled in instead of holding up the save. What is
+     * missing until submit is only the row that says which note owns them.
+     */
+    val attachments: List<AttachmentDraft> = emptyList(),
+    /** True while a picked file is being shrunk or a PDF rendered. */
+    val attachmentBusy: Boolean = false,
+    /** Why the last pick produced nothing, or what it left out. */
+    val attachmentMessage: String? = null,
+
     /** Errors stay hidden until the user has tried to submit. */
     val showErrors: Boolean = false,
     val saving: Boolean = false,
@@ -87,6 +104,9 @@ data class EntryUiState(
 
     val categories: List<Category>
         get() = type?.let { Category.of(it) } ?: emptyList()
+
+    /** The staged pictures in the shape every thumbnail already draws. */
+    val attachmentPreviews: List<Attachment> get() = attachments.map { it.asPreview() }
 
     /** The colour to offer a bank created from inside this flow. */
     val suggestedBankColor: BankColor get() = BankColor.suggestFor(banks.map { it.color })

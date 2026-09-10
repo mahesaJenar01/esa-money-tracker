@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.data.model.TransactionType
 import com.esa.moneytracker.ui.theme.MoneyTheme
@@ -44,6 +45,11 @@ import java.time.ZoneId
  * leading with one turned the list into a wall of ragged text with the useful
  * part buried under it. The short, predictable facts go first and the sentence
  * gets a line of its own, clipped to one until the row is opened.
+ *
+ * A note with pictures shows the first one between the sentence and the amount.
+ * The picture itself rather than a paperclip: the point of putting it in the
+ * list at all is being able to find the note with *that* struk on it without
+ * opening every note of the week.
  */
 @Composable
 fun TransactionRow(
@@ -56,6 +62,10 @@ fun TransactionRow(
     dimmed: Boolean = false,
     /** Opened rows show the whole description instead of clipping it. */
     expanded: Boolean = false,
+    /** The note's pictures; the first one is drawn in the row. */
+    attachments: List<Attachment> = emptyList(),
+    /** Tapping the picture goes straight to the viewer, opened at that one. */
+    onOpenAttachment: ((Int) -> Unit)? = null,
     onClick: (() -> Unit)? = null,
 ) {
     val colors = MoneyTheme.colors
@@ -132,6 +142,11 @@ fun TransactionRow(
                 maxLines = if (expanded) Int.MAX_VALUE else 1,
                 overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
             )
+        }
+
+        if (attachments.isNotEmpty()) {
+            Spacer(Modifier.width(10.dp))
+            AttachmentBadge(attachments = attachments, onOpen = onOpenAttachment)
         }
 
         Spacer(Modifier.width(10.dp))

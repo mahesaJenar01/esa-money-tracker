@@ -72,6 +72,8 @@ fun RecordsScreen(
     onDelete: (String) -> Unit,
     onRestore: (String) -> Unit,
     onDeleteCheck: (String) -> Unit,
+    /** Opens the viewer on one note's picture, by note id and position. */
+    onOpenAttachment: (String, Int) -> Unit,
     onOpenBin: () -> Unit,
     onCheckBalance: () -> Unit,
     modifier: Modifier = Modifier,
@@ -148,6 +150,11 @@ fun RecordsScreen(
                                         transaction = transaction,
                                         zone = zone,
                                         bankLabel = state.bankNames[transaction.bankId],
+                                        attachments = state.attachments[transaction.id]
+                                            .orEmpty(),
+                                        onOpenAttachment = { index ->
+                                            onOpenAttachment(transaction.id, index)
+                                        },
                                         expanded = expandedId == entry.key,
                                         onToggle = {
                                             expandedId =

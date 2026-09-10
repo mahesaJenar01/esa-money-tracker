@@ -1,5 +1,6 @@
 package com.esa.moneytracker.ui.edit
 
+import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.BankBalance
 import com.esa.moneytracker.data.model.BankColor
 import com.esa.moneytracker.data.model.Category
@@ -34,6 +35,21 @@ data class EditUiState(
      */
     val occurredAt: LocalDateTime? = null,
     val originalOccurredAt: LocalDateTime? = null,
+
+    /**
+     * The pictures on this note, as the database currently has them.
+     *
+     * Not part of the form. Adding or removing one is written straight away
+     * rather than waiting for Simpan, because a lampiran is a file on disk, not
+     * a field — staging removals until save would mean holding a photo the user
+     * has already deleted and hoping they come back to confirm it. The page says
+     * so under the picker rather than leaving it to be discovered.
+     */
+    val attachments: List<Attachment> = emptyList(),
+    /** True while a picked file is being shrunk or a PDF rendered. */
+    val attachmentBusy: Boolean = false,
+    /** Why the last pick produced nothing, or what it left out. */
+    val attachmentMessage: String? = null,
 
     val showErrors: Boolean = false,
     val saving: Boolean = false,

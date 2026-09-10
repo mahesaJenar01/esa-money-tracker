@@ -38,6 +38,11 @@ rupiah.
 - **Analytics** — a period picker that currently offers **Mingguan** (weekly).
   The card shows income, expense, the difference, and a per-category breakdown of
   spending in that window.
+- **Lampiran** — a note can carry pictures: a photo of the struk, a screenshot
+  of a transfer receipt, or a PDF invoice, which is rendered to a picture per
+  page when it is picked. The first one shows in the history row itself, so the
+  note with *that* receipt on it can be found without opening any of them. See
+  [Lampiran](#lampiran).
 - **Pindah dana** — money moved between your own pockets: bank to bank, *setor
   tunai*, *tarik tunai*. It is not income and not an expense, it has its own
   history, and it never appears in Riwayat. See [Pindah dana](#pindah-dana).
@@ -48,9 +53,10 @@ rupiah.
      *Makan*, *Langganan*, *Kebutuhan*, *Belanja*, *Lainnya* for expenses.
   3. Amount (digits only, formatted to rupiah as you type), which pocket — and
      for Online, which **bank** — the money moved through, **when** it happened,
-     and a **mandatory** description. Submitting returns to the home screen.
+     a **mandatory** description, and any **lampiran**. Submitting returns to the
+     home screen.
 - **Ubah** — editing opens a single page holding everything that can change:
-  type, category, amount, pocket, bank, time and description. Saving rewrites the
+  type, category, amount, pocket, bank, time, description and lampiran. Saving rewrites the
   note **in place**: it keeps the date it already had and simply gains a mark
   saying it was changed. The button stays disabled until something is actually
   different, so opening a note and backing out through *Simpan* cannot brand it
@@ -62,10 +68,12 @@ rupiah.
 app/src/main/java/com/esa/moneytracker/
 ├── data/
 │   ├── model/        Transaction, TransactionType, Pocket, Category, Bank,
-│   │                 OnlinePocket, BalanceCheck
+│   │                 OnlinePocket, BalanceCheck, Attachment
 │   ├── local/        Room entities, DAOs, database and its migrations
+│   ├── attachment/   the files behind the lampiran, and the PDF renderer
 │   ├── repository/   TransactionRepository — the only way in or out of storage
-│   └── export/       BackupDocument, TransactionExportRecord, ExportFormat
+│   └── export/       BackupDocument, TransactionExportRecord, ExportFormat,
+│                     BackupArchive
 ├── ui/
 │   ├── theme/        colours, type scale, shapes, semantic MoneyColors
 │   ├── components/   reusable pieces (balance header, rows, badges, form fields)
@@ -78,9 +86,11 @@ app/src/main/java/com/esa/moneytracker/
 │   ├── entry/        the three-step input flow, EntryViewModel
 │   ├── edit/         the single-page edit screen
 │   ├── records/      the week-by-week full history
+│   ├── viewer/       one lampiran, full screen, pinch to zoom
 │   ├── bin/          catatan terhapus, the 30-day bin
 │   └── navigation/   NavHost wiring
-└── util/             rupiah formatting, Indonesian dates, AnalyticsPeriod, WeekWindow
+└── util/             rupiah formatting, Indonesian dates, AnalyticsPeriod,
+                      WeekWindow, Images
 ```
 
 ## Banks
@@ -274,6 +284,63 @@ Nothing is backfilled on upgrade. A mark says somebody sat down and compared the
 app against a bank, and there is no honest way to invent one for a week nobody
 checked — so an install has no marks until the first check is made.
 
+## Lampiran
+
+A note can carry up to ten pictures. A struk photographed at the till, a
+screenshot of a transfer receipt, an invoice that arrived as a PDF — all three
+end up as the same thing, and that is the whole design.
+
+**Everything becomes a picture.** A PDF is rendered page by page the moment it is
+picked, through `android.graphics.pdf.PdfRenderer`, which has been part of
+Android since long before this app's `minSdk` — no library, nothing added to the
+APK. Each page is written out as an ordinary JPEG, so nothing downstream ever has
+to know that a particular picture was once an invoice: one thumbnail, one viewer,
+one backup format. Pages past the twelfth are left out and the form says so; a
+password-protected PDF is refused with a message, because there is no password to
+offer it.
+
+**Everything is shrunk on the way in.** A phone camera hands over a
+twelve-megapixel file of four megabytes or more, which is absurd for a photo of a
+receipt. Pictures are resized to 2000 pixels on the long edge and saved as JPEG
+at quality 85 — around 300 KB, and the writing on a struk is still perfectly
+readable zoomed in. Decoding is sampled rather than full-size, because a bitmap
+is four bytes a pixel once in memory and decoding that camera file whole would
+cost 48 MB.
+
+**Where they live.** In the app's own folder — `attachments/` for the picture,
+`attachments/thumb/` for the small copy the list rows draw — and never in the
+database, which only ever holds the file's name. That keeps a 400 KB photo out of
+every query that wanted a rupiah figure. It also means no storage permission is
+ever asked for: the camera writes through the `FileProvider` into the app's
+cache, the gallery goes through the system photo picker, and a PDF through the
+document picker.
+
+**Where they show.**
+
+| Where | What |
+| --- | --- |
+| History row | the first picture, small, with a `+2` badge for the rest — tap it to open the viewer |
+| Opened row | the whole set at a size where a shop name and a total are already readable |
+| Viewer | one picture filling the screen: pinch to zoom, drag to move, double-tap to reset, share |
+
+The viewer steps between pictures with the rail underneath rather than by
+swiping. A swipe already means "move the zoomed picture", and giving it a second
+meaning is how a viewer ends up fighting the finger that is using it.
+
+**Catat stages, Ubah writes.** In the Catat flow the note has no id yet, so a
+picked picture is written to disk immediately and only claimed by a row once the
+note itself is saved — the slow part (shrinking a photo, rendering an invoice)
+happens while the rest of the form is still being filled in, and the save stays
+instant. Abandoning the form leaves a file that no row claims, and the next
+launch sweeps it away. On the edit page the note already exists, so adding or
+removing a lampiran is written straight away rather than waiting for *Simpan*;
+the page says so under the picker.
+
+**Deleting.** A note in the bin keeps its pictures — restoring it would be a poor
+kind of undo otherwise. Once the note is purged for good after its 30 days, its
+pictures are orphans, and the same launch sweep that clears abandoned files
+clears them too.
+
 ## Adding monthly and yearly analytics
 
 `util/AnalyticsPeriod.kt` is an enum where each constant owns its own date range:
@@ -301,7 +368,28 @@ anywhere else.
 | Format | Contains | Importable |
 | --- | --- | --- |
 | `.json` | opening balances, banks, balance checks, transfers **and** every live note | yes |
+| `.zip` | the same `.json`, plus every lampiran as a file beside it | yes |
 | `.csv` | one row per note, nothing else | no — for spreadsheets |
+
+The backup button offers the `.zip` only when there are lampiran to carry, and
+says how much they add. With no pictures an archive is just a zipped text file,
+and a plain `.json` is the one that can be opened and read anywhere. An import
+accepts either without being told which: a ZIP starts with four bytes nothing
+else does.
+
+```
+esa-money-tracker-20260910-1830.zip
+├── data.json           exactly the file a .json backup would have been
+└── lampiran/<id>.jpg   one entry per picture
+```
+
+Pictures are streamed straight into the app's own folder as the archive is read,
+so a backup holding a hundred megabytes of receipts never has to fit in memory.
+The small copies are not shipped — they are drawn again from the pictures after
+an import rather than being paid for twice. A lampiran row is only restored when
+its picture actually landed: a note claiming a receipt it cannot show is worse
+than a note with none, which is also why a `.json` carried to a *new* phone
+restores the notes without their pictures.
 
 Importing **merges by id**: a note already on file is replaced by the version in
 the backup and anything new is added, so importing the same file twice leaves the
@@ -312,9 +400,9 @@ balance in the file replaces the current one — restoring a backup that did not
 restore the starting balances would leave every total wrong. Notes in the 30-day
 bin are not exported; closed banks are, because live notes still point at them.
 
-Format version 4 added the transfers; a file written before it simply has none,
-which is not the same as "they were deleted" — an import only ever adds and
-replaces.
+Format version 4 added the transfers and version 5 the lampiran; a file written
+before either simply has none, which is not the same as "they were deleted" — an
+import only ever adds and replaces.
 
 **Old files still work.** A file written before format version 3 carries no
 balance checks, which means the backup predates the mark rather than that the
@@ -355,6 +443,14 @@ screen is gating on, so the app moves straight on with the restored data.
   exists and everything about which bank holds it, so a backup without them
   would put the right total in the wrong places. A row whose two ends are the
   same is skipped — it would move nothing.
+- `AttachmentExportRecord` is one lampiran — its description only. The picture
+  is a separate entry in the archive, which is the whole reason a backup with
+  pictures is a `.zip`: a photo written into JSON has to be base64, inflating it
+  by a third and turning a fifty-kilobyte backup into a ten-megabyte one that is
+  slow to write and slower to parse. The file name is checked rather than trusted
+  on the way in, both when the bytes are written and when the row is read.
+- `BackupArchive` packs and unpacks that ZIP, and is the one place that knows an
+  archive's shape.
 - `TransactionExportRecord` is one note, in both directions — it carries machine
   ids *and* human labels so the file is readable without the app, plus ISO
   timestamps precise enough to parse back exactly. `toEntity()` is the import

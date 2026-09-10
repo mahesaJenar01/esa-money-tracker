@@ -13,6 +13,12 @@ data class ImportResult(
     /** Moves between pockets restored, so the money is in the right banks. */
     val transfersImported: Int = 0,
     /**
+     * Pictures restored, counting only those whose bytes were actually in the
+     * archive: a row without its file would put a lampiran on a note that can
+     * never be opened, so those are dropped rather than counted.
+     */
+    val attachmentsImported: Int = 0,
+    /**
      * The bank a pre-bank file's Online balance was folded into, when that
      * happened, so the screen can say the data has been moved onto the new
      * system and name where it went.

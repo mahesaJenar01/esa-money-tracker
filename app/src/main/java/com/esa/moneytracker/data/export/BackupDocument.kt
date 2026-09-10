@@ -59,6 +59,17 @@ data class BackupDocument(
      * them would put the right total in the wrong places.
      */
     @SerialName("transfers") val transfers: List<TransferExportRecord> = emptyList(),
+    /**
+     * The pictures kept with the notes — a struk, an invoice, a receipt.
+     *
+     * Absent before format version 5, and absent in a plain `.json` backup even
+     * now: these rows only describe the pictures, and the pictures themselves
+     * are separate entries in the `.zip` the export writes when there is at
+     * least one. A file that carries the rows without the bytes restores notes
+     * that say they have a lampiran and cannot show it, so the importer only
+     * reads this list when it came out of an archive.
+     */
+    @SerialName("attachments") val attachments: List<AttachmentExportRecord> = emptyList(),
 ) {
     /** True for a file written before banks existed. */
     val preBanks: Boolean get() = formatVersion < 2 || banks.isEmpty()
@@ -70,7 +81,7 @@ data class BackupDocument(
 
     companion object {
         const val APP_ID = "esa-money-tracker"
-        const val FORMAT_VERSION = 4
+        const val FORMAT_VERSION = 5
 
         private val json = Json {
             prettyPrint = true
@@ -84,6 +95,7 @@ data class BackupDocument(
             transactions: List<TransactionExportRecord>,
             balanceChecks: List<BalanceCheckExportRecord>,
             transfers: List<TransferExportRecord>,
+            attachments: List<AttachmentExportRecord>,
             zone: ZoneId,
             now: Instant = Instant.now(),
         ): BackupDocument = BackupDocument(
@@ -93,6 +105,7 @@ data class BackupDocument(
             transactions = transactions,
             balanceChecks = balanceChecks,
             transfers = transfers,
+            attachments = attachments,
         )
 
         /** Null when the text is not JSON at all; check [recognised] after that. */

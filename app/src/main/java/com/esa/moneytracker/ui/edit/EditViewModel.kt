@@ -1,11 +1,14 @@
 package com.esa.moneytracker.ui.edit
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.esa.moneytracker.MoneyTrackerApp
+import com.esa.moneytracker.data.attachment.AttachmentImport
+import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.BankColor
 import com.esa.moneytracker.data.model.BankFunding
 import com.esa.moneytracker.data.model.Category
@@ -20,6 +23,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import java.time.LocalDateTime
 import java.time.ZoneId
 
@@ -50,7 +54,8 @@ class EditViewModel(
             repository.observeBanks(),
             repository.observeAll(),
             repository.observeTransfers(),
-        ) { current, banks, transactions, transfers ->
+            repository.observeAttachmentsFor(transactionId),
+        ) { current, banks, transactions, transfers, attachments ->
             // Balances, not bare names: the picker is also where a bank gets
             // created, and that dialog has to say what the other banks hold.
             val open = onlinePocketOf(banks, transactions, transfers).banks
@@ -58,6 +63,10 @@ class EditViewModel(
                 banks = open,
                 bankId = current.bankId?.takeIf { id -> open.any { it.id == id } }
                     ?: open.firstOrNull()?.id,
+                // Read rather than held: a lampiran added here is already in the
+                // database, so the list comes back the same way it would after
+                // reopening the page.
+                attachments = attachments,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -126,6 +135,57 @@ class EditViewModel(
         viewModelScope.launch {
             val bank = repository.addBank(name, color, amount, funding)
             form.update { it.copy(bankId = bank.id) }
+        }
+    }
+
+    /**
+     * Adds a picture to this note, straight away.
+     *
+     * Unlike every other field on this page there is nothing to stage: the note
+     * already exists, so the row can be written the moment the picture is ready.
+     * That also means backing out without saving keeps the lampiran, which is
+     * what the note under the picker says.
+     */
+    fun addAttachment(uri: Uri) = stage { repository.stageAttachment(uri, allowance()) }
+
+    /** The same, for a photo the camera has just taken. */
+    fun addCapture(file: File) = stage { repository.stageCapture(file) }
+
+    /** Removes a picture from this note, row and file together. */
+    fun removeAttachment(attachment: Attachment) {
+        viewModelScope.launch { repository.detach(attachment) }
+    }
+
+    fun dismissAttachmentMessage() = form.update { it.copy(attachmentMessage = null) }
+
+    private fun allowance(): Int =
+        Attachment.MAX_PER_TRANSACTION - state.value.attachments.size
+
+    private fun stage(block: suspend () -> AttachmentImport) {
+        if (form.value.attachmentBusy) return
+        form.update { it.copy(attachmentBusy = true, attachmentMessage = null) }
+        viewModelScope.launch {
+            when (val result = block()) {
+                is AttachmentImport.Added -> {
+                    repository.attach(transactionId, result.drafts)
+                    form.update {
+                        it.copy(
+                            attachmentBusy = false,
+                            attachmentMessage = if (result.pagesLeftOut > 0) {
+                                "Hanya " + result.drafts.size + " halaman pertama yang " +
+                                    "diambil; " + result.pagesLeftOut +
+                                    " halaman sisanya dilewati."
+                            } else {
+                                null
+                            },
+                        )
+                    }
+                }
+
+                is AttachmentImport.Failed -> form.update {
+                    it.copy(attachmentBusy = false, attachmentMessage = result.message)
+                }
+            }
         }
     }
 

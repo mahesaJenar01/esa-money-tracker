@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.esa.moneytracker.MoneyTrackerApp
+import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.data.model.TransactionType
@@ -37,6 +38,8 @@ data class RecordsUiState(
 
     /** Bank id to name, so a history row can say where the money moved. */
     val bankNames: Map<String, String> = emptyMap(),
+    /** Note id to its pictures, so a row can show the struk it carries. */
+    val attachments: Map<String, List<Attachment>> = emptyMap(),
 
     /** The most recent reconciliation, for the line under the title. */
     val lastCheck: BalanceCheck? = null,
@@ -68,14 +71,20 @@ class RecordsViewModel(
 
     val state: StateFlow<RecordsUiState> =
         combine(
-            repository.observeAll(),
+            // Paired up because `combine` takes five flows and this needs six.
+            // The lampiran belong to the notes, so they arrive with them.
+            combine(
+                repository.observeAll(),
+                repository.observeAttachments(),
+            ) { transactions, attachments -> transactions to attachments },
             repository.observeDeleted(),
             repository.observeBanks(),
             repository.observeBalanceChecks(),
             week,
-        ) { transactions, deleted, banks, checks, window ->
+        ) { (transactions, attachments), deleted, banks, checks, window ->
             buildState(
                 transactions = transactions,
+                attachments = attachments,
                 checks = checks,
                 binCount = deleted.size,
                 bankNames = banks.associate { it.id to it.name },
@@ -110,6 +119,7 @@ class RecordsViewModel(
 
     private fun buildState(
         transactions: List<Transaction>,
+        attachments: Map<String, List<Attachment>>,
         checks: List<BalanceCheck>,
         binCount: Int,
         bankNames: Map<String, String>,
@@ -136,6 +146,7 @@ class RecordsViewModel(
             count = inWeek.size,
             binCount = binCount,
             bankNames = bankNames,
+            attachments = attachments,
             lastCheck = checks.maxByOrNull { it.checkedAt },
             canGoOlder = oldest != null && oldest.isBefore(window.start),
             canGoNewer = window.start.isBefore(WeekWindow.of(today).start),

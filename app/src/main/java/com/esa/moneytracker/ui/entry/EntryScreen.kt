@@ -51,10 +51,13 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import android.net.Uri
+import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.Category
 import com.esa.moneytracker.data.model.Pocket
 import com.esa.moneytracker.data.model.TransactionType
 import com.esa.moneytracker.ui.components.AmountField
+import com.esa.moneytracker.ui.components.AttachmentPicker
 import com.esa.moneytracker.ui.components.DescriptionField
 import com.esa.moneytracker.ui.components.FieldLabel
 import com.esa.moneytracker.ui.components.IconBadge
@@ -68,6 +71,7 @@ import com.esa.moneytracker.ui.components.BankPicker
 import com.esa.moneytracker.ui.components.OccurredAtField
 import com.esa.moneytracker.ui.theme.MoneyTheme
 import com.esa.moneytracker.util.CurrencyFormatter
+import java.io.File
 import java.time.LocalDateTime
 
 @Composable
@@ -83,6 +87,9 @@ fun EntryScreen(
     onDescriptionChanged: (String) -> Unit,
     onOccurredAtChanged: (LocalDateTime) -> Unit,
     onResetOccurredAt: () -> Unit,
+    onPickAttachment: (Uri) -> Unit,
+    onCaptureAttachment: (File) -> Unit,
+    onRemoveAttachment: (Attachment) -> Unit,
     onBack: () -> Unit,
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier,
@@ -123,6 +130,9 @@ fun EntryScreen(
                         onDescriptionChanged = onDescriptionChanged,
                         onOccurredAtChanged = onOccurredAtChanged,
                         onResetOccurredAt = onResetOccurredAt,
+                        onPickAttachment = onPickAttachment,
+                        onCaptureAttachment = onCaptureAttachment,
+                        onRemoveAttachment = onRemoveAttachment,
                         onSubmit = onSubmit,
                     )
                 }
@@ -369,6 +379,9 @@ private fun DetailsStep(
     onDescriptionChanged: (String) -> Unit,
     onOccurredAtChanged: (LocalDateTime) -> Unit,
     onResetOccurredAt: () -> Unit,
+    onPickAttachment: (Uri) -> Unit,
+    onCaptureAttachment: (File) -> Unit,
+    onRemoveAttachment: (Attachment) -> Unit,
     onSubmit: () -> Unit,
 ) {
     val colors = MoneyTheme.colors
@@ -486,6 +499,28 @@ private fun DetailsStep(
             isError = state.showErrors && state.descriptionError != null,
             errorText = state.descriptionError,
         )
+
+        Spacer(Modifier.height(18.dp))
+
+        FieldLabel("Lampiran (opsional)")
+        Spacer(Modifier.height(8.dp))
+        AttachmentPicker(
+            attachments = state.attachmentPreviews,
+            busy = state.attachmentBusy,
+            onPicked = onPickAttachment,
+            onCaptured = onCaptureAttachment,
+            onRemove = onRemoveAttachment,
+            footnote = "Foto struk, bukti transfer, atau PDF invoice. " +
+                "PDF akan diubah jadi gambar per halaman.",
+        )
+        if (state.attachmentMessage != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = state.attachmentMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
 
         Spacer(Modifier.height(24.dp))
 

@@ -1,6 +1,7 @@
 package com.esa.moneytracker
 
 import android.app.Application
+import com.esa.moneytracker.data.attachment.AttachmentStore
 import com.esa.moneytracker.data.local.MoneyDatabase
 import com.esa.moneytracker.data.repository.TransactionRepository
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +25,8 @@ class MoneyTrackerApp : Application() {
             database.bankDao(),
             database.balanceCheckDao(),
             database.transferDao(),
+            database.attachmentDao(),
+            AttachmentStore(this),
         )
     }
 
@@ -38,6 +41,11 @@ class MoneyTrackerApp : Application() {
             // that arrived from an old backup file, or an online note that was
             // somehow left without a bank.
             repository.normaliseBanks()
+            // Pictures with no note behind them: what an abandoned Catat form
+            // leaves staged on disk, and what a note purged from the bin leaves
+            // in the table. Launch is the one moment this is safe — no form is
+            // open, so nothing is half-written.
+            repository.sweepAttachments()
         }
     }
 }

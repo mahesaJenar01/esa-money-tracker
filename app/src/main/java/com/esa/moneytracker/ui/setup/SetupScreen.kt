@@ -45,6 +45,7 @@ import com.esa.moneytracker.data.model.BankColor
 import com.esa.moneytracker.data.model.Pocket
 import com.esa.moneytracker.data.model.TransactionType
 import com.esa.moneytracker.ui.backup.DocumentIo
+import java.io.InputStream
 import com.esa.moneytracker.ui.backup.MessageBanner
 import com.esa.moneytracker.ui.banks.AddBankDialog
 import com.esa.moneytracker.ui.components.AmountField
@@ -74,7 +75,7 @@ fun SetupScreen(
     onAddBank: (String, BankColor, Long) -> Unit,
     onRemoveBank: (Int) -> Unit,
     onSubmit: () -> Unit,
-    onImport: (() -> String?) -> Unit,
+    onImport: (() -> InputStream?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MoneyTheme.colors
@@ -84,7 +85,7 @@ fun SetupScreen(
     val openBackup = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
-        if (uri != null) onImport { DocumentIo.readText(context, uri) }
+        if (uri != null) onImport { DocumentIo.openInput(context, uri) }
     }
 
     if (addingBank) {
@@ -265,7 +266,7 @@ fun SetupScreen(
                     .background(colors.surfaceElevated)
                     .border(1.dp, colors.hairline, RoundedCornerShape(18.dp))
                     .clickable(enabled = !state.saving) {
-                        openBackup.launch(arrayOf(ExportFormat.JSON.mimeType, "*/*"))
+                        openBackup.launch(arrayOf(ExportFormat.JSON.mimeType, "application/zip", "*/*"))
                     }
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,

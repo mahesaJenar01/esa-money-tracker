@@ -11,6 +11,7 @@ import com.esa.moneytracker.data.repository.NewBank
 import com.esa.moneytracker.data.repository.TransactionRepository
 import com.esa.moneytracker.ui.backup.BackupMessage
 import com.esa.moneytracker.ui.backup.runImport
+import java.io.InputStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -86,7 +87,7 @@ class SetupViewModel(
      * exactly the condition this screen is gating on — so the app moves on by
      * itself, with the restored data already in place.
      */
-    fun importBackup(source: () -> String?) {
+    fun importBackup(source: () -> InputStream?) {
         if (form.value.saving) return
         form.update { it.copy(saving = true, message = null) }
         viewModelScope.launch {

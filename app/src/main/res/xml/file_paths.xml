@@ -3,4 +3,17 @@
     <!-- Where exported data files will be written. -->
     <cache-path name="exports" path="exports/" />
     <files-path name="exports_files" path="exports/" />
+
+    <!--
+        Where the camera writes a photo before it is accepted. The camera app
+        cannot see into this app's folder on its own, so it is handed a
+        content:// URI pointing here for exactly one shot.
+    -->
+    <cache-path name="captures" path="captures/" />
+
+    <!--
+        The kept lampiran, so one can be handed to a share sheet. Read-only in
+        practice: nothing outside the app ever writes here.
+    -->
+    <files-path name="attachments" path="attachments/" />
 </paths>

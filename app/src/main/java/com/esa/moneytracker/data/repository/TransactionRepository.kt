@@ -1,11 +1,17 @@
 package com.esa.moneytracker.data.repository
 
+import com.esa.moneytracker.data.attachment.AttachmentDraft
+import com.esa.moneytracker.data.attachment.AttachmentImport
+import com.esa.moneytracker.data.attachment.AttachmentStore
+import com.esa.moneytracker.data.export.AttachmentExportRecord
+import com.esa.moneytracker.data.export.BackupArchive
 import com.esa.moneytracker.data.export.BackupDocument
 import com.esa.moneytracker.data.export.BalanceCheckExportRecord
 import com.esa.moneytracker.data.export.BankExportRecord
 import com.esa.moneytracker.data.export.ImportResult
 import com.esa.moneytracker.data.export.TransactionExportRecord
 import com.esa.moneytracker.data.export.TransferExportRecord
+import com.esa.moneytracker.data.local.AttachmentDao
 import com.esa.moneytracker.data.local.BalanceCheckDao
 import com.esa.moneytracker.data.local.BalanceCheckEntity
 import com.esa.moneytracker.data.local.BalanceCheckItemEntity
@@ -18,6 +24,7 @@ import com.esa.moneytracker.data.local.TransactionEntity
 import com.esa.moneytracker.data.local.TransferDao
 import com.esa.moneytracker.data.local.toDomain
 import com.esa.moneytracker.data.local.toEntity
+import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.BalanceCheckItem
 import com.esa.moneytracker.data.model.Bank
@@ -33,6 +40,8 @@ import com.esa.moneytracker.data.model.Transfer
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import android.net.Uri
+import java.io.File
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -79,6 +88,9 @@ class TransactionRepository(
     private val bankDao: BankDao,
     private val balanceCheckDao: BalanceCheckDao,
     private val transferDao: TransferDao,
+    private val attachmentDao: AttachmentDao,
+    /** The files behind the lampiran; the database only ever holds their names. */
+    private val attachments: AttachmentStore,
 ) {
 
     fun observeAll(): Flow<List<Transaction>> =
@@ -268,7 +280,15 @@ class TransactionRepository(
     /** Undo: the record reappears in the exact position it was deleted from. */
     suspend fun restore(id: String) = dao.restore(id)
 
-    /** Clears out anything that has sat in the bin for more than 30 days. */
+    /**
+     * Clears out anything that has sat in the bin for more than 30 days.
+     *
+     * The pictures of a purged note go with it, but not from here: the note's
+     * row is gone by then, so its lampiran are orphans and it is
+     * [sweepAttachments] that recognises them as such. Keeping the two apart
+     * means the same sweep also catches what a crash or an older version left
+     * behind.
+     */
     suspend fun purgeExpiredDeleted(now: Instant = Instant.now()): Int {
         val cutoff = now.minus(Duration.ofDays(TransactionEntity.RETENTION_DAYS)).toEpochMilli()
         return dao.purgeDeletedBefore(cutoff) + transferDao.purgeDeletedBefore(cutoff)
@@ -553,6 +573,108 @@ class TransactionRepository(
 
     suspend fun restoreTransfer(id: String) = transferDao.restore(id)
 
+    // ------------------------------------------------------------ attachments
+
+    /**
+     * Every lampiran in the app, grouped by the note it belongs to.
+     *
+     * One flow for the whole table rather than a query per row: the rows are a
+     * file name and a few numbers each, and the history list would otherwise
+     * fire a database read for every note that scrolls past.
+     */
+    fun observeAttachments(): Flow<Map<String, List<Attachment>>> =
+        attachmentDao.observeAll().map { rows ->
+            rows.map { it.toDomain() }.groupBy { it.transactionId }
+        }
+
+    /** The lampiran of one note, for the edit page and the viewer. */
+    fun observeAttachmentsFor(transactionId: String): Flow<List<Attachment>> =
+        attachmentDao.observeFor(transactionId).map { rows -> rows.map { it.toDomain() } }
+
+    suspend fun attachmentCountFor(transactionId: String): Int =
+        attachmentDao.countFor(transactionId)
+
+    /**
+     * Turns a picked photo or PDF into pictures on disk, without attaching them
+     * to anything yet.
+     *
+     * The Catat flow has to be able to do this before the note it is describing
+     * exists, so the file comes first and the row follows at [attach]. A form
+     * that is abandoned leaves the file behind; [sweepAttachments] takes it away
+     * on the next launch.
+     */
+    suspend fun stageAttachment(uri: Uri, allowance: Int): AttachmentImport =
+        attachments.stage(uri, allowance)
+
+    /** The same, for a photo the camera has just written into the cache. */
+    suspend fun stageCapture(capture: File): AttachmentImport =
+        attachments.stageCapture(capture)
+
+    /** Throws away staged pictures that were never attached to a note. */
+    fun discardStaged(drafts: List<AttachmentDraft>) {
+        drafts.forEach { attachments.remove(it.fileName) }
+    }
+
+    /**
+     * Writes the rows that make staged pictures belong to a note.
+     *
+     * Called after the note itself is saved, so a lampiran can never point at a
+     * note that does not exist. The files are already on disk by this point —
+     * this only records which note claims them, and in what order.
+     */
+    suspend fun attach(
+        transactionId: String,
+        drafts: List<AttachmentDraft>,
+        now: Instant = Instant.now(),
+    ): List<Attachment> {
+        if (drafts.isEmpty()) return emptyList()
+        val start = attachmentDao.highestPosition(transactionId) + 1
+        val rows = drafts.mapIndexed { index, draft ->
+            Attachment(
+                id = draft.id,
+                transactionId = transactionId,
+                source = draft.source,
+                fileName = draft.fileName,
+                label = draft.label,
+                page = draft.page,
+                width = draft.width,
+                height = draft.height,
+                sizeBytes = draft.sizeBytes,
+                position = start + index,
+                createdAt = now,
+            )
+        }
+        attachmentDao.upsertAll(rows.map { it.toEntity() })
+        return rows
+    }
+
+    /** Removes one lampiran, row and files together. */
+    suspend fun detach(attachment: Attachment) {
+        attachmentDao.delete(attachment.id)
+        attachments.remove(attachment.fileName)
+    }
+
+    /**
+     * Housekeeping: rows whose note is gone, and files no row claims.
+     *
+     * Run on launch rather than continuously, because the second half of it is
+     * only safe when no form is open — a picture staged by a Catat form in
+     * progress has no row yet and is exactly what this would delete.
+     */
+    suspend fun sweepAttachments(): Int {
+        val orphans = attachmentDao.orphans()
+        if (orphans.isNotEmpty()) {
+            attachmentDao.deleteForTransactions(orphans.map { it.transactionId }.distinct())
+        }
+        val keep = attachmentDao.getAllOnce().map { it.fileName }.toSet()
+        return attachments.sweep(keep)
+    }
+
+    /** Redraws any small copy that went missing — after an import, above all. */
+    suspend fun ensureThumbnails() {
+        attachmentDao.getAllOnce().forEach { attachments.ensureThumbnail(it.toDomain()) }
+    }
+
     // ---------------------------------------------------------- export/import
 
     /**
@@ -576,10 +698,15 @@ class TransactionRepository(
      * banks *are* included, because live notes still point at them, and so are
      * the balance checks: a restored history that had forgotten where it was
      * last reconciled would send the user back through every week of it.
+     *
+     * The lampiran are described here but their bytes are not. A note in the bin
+     * takes its pictures out of the backup with it, for the same reason it takes
+     * itself out.
      */
     suspend fun exportBackup(zone: ZoneId = ZoneId.systemDefault()): BackupDocument {
         val items = balanceCheckDao.getAllItems().groupBy { it.checkId }
         val bankNames = bankDao.getAll().associate { it.id to it.name }
+        val live = dao.getAllOnce().map { it.id }.toSet()
         return BackupDocument.build(
             openingBalances = openingBalanceDao.getAll().toOpeningBalances(),
             banks = bankDao.getAll().map { BankExportRecord.from(it, zone) },
@@ -590,9 +717,27 @@ class TransactionRepository(
             transfers = transferDao.getAllOnce().map {
                 TransferExportRecord.from(it, zone, bankNames)
             },
+            attachments = attachmentDao.getAllOnce()
+                .filter { it.transactionId in live }
+                .map { AttachmentExportRecord.from(it, zone) },
             zone = zone,
         )
     }
+
+    /**
+     * The pictures [document] refers to, ready to be written into an archive.
+     *
+     * Openers rather than bytes, so an export with thirty receipts in it never
+     * holds thirty photos in memory at once.
+     */
+    fun archiveEntries(document: BackupDocument): List<BackupArchive.Entry> =
+        document.attachments.map { record ->
+            BackupArchive.Entry(record.file) { attachments.openForBackup(record.file) }
+        }
+
+    /** Writes one picture out of a backup archive into the app's own folder. */
+    fun restoreAttachmentFile(fileName: String, input: java.io.InputStream): Boolean =
+        attachments.writeFromBackup(fileName, input)
 
     /**
      * Writes a backup back into the database, merging by id.
@@ -607,6 +752,10 @@ class TransactionRepository(
      * online balance in that figure and names no bank on any note; both are
      * folded into a bank afterwards, so an old backup lands on the new system
      * holding exactly the total it left with.
+     *
+     * Lampiran are the one thing that is not merged blindly: a row is only kept
+     * when its picture is on this phone, because a note claiming a lampiran it
+     * cannot show is worse than a note with none.
      */
     suspend fun importBackup(document: BackupDocument): ImportResult {
         val banks = document.banks.mapNotNull { it.toEntity() }
@@ -651,6 +800,22 @@ class TransactionRepository(
         val transfers = document.transfers.mapNotNull { it.toEntity() }
         if (transfers.isNotEmpty()) transferDao.upsertAll(transfers)
 
+        // A lampiran row is only worth anything when the picture it names is
+        // actually on this phone. That is true when the archive has just
+        // unpacked it, and also when a plain .json backup is re-imported onto
+        // the phone that made it — but never for a .json carried to a new phone,
+        // where restoring the rows would put an unopenable lampiran on the note.
+        val known = existing + entities.map { it.id }
+        val restored = document.attachments
+            .mapNotNull { it.toEntity() }
+            .filter { it.transactionId in known && attachments.file(it.fileName).exists() }
+        if (restored.isNotEmpty()) {
+            attachmentDao.upsertAll(restored)
+            // The small copies are never shipped — they are derived from the
+            // pictures, so they are drawn again here rather than paid for twice.
+            restored.forEach { attachments.ensureThumbnail(it.toDomain()) }
+        }
+
         val foldedInto = normaliseBanks()
 
         return ImportResult(
@@ -661,6 +826,7 @@ class TransactionRepository(
             banksImported = banks.size,
             checksImported = checks.size,
             transfersImported = transfers.size,
+            attachmentsImported = restored.size,
             foldedIntoBank = foldedInto.takeIf { document.preBanks },
         )
     }

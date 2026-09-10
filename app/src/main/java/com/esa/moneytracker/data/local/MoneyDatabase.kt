@@ -15,8 +15,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BalanceCheckEntity::class,
         BalanceCheckItemEntity::class,
         TransferEntity::class,
+        AttachmentEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class MoneyDatabase : RoomDatabase() {
@@ -30,6 +31,8 @@ abstract class MoneyDatabase : RoomDatabase() {
     abstract fun balanceCheckDao(): BalanceCheckDao
 
     abstract fun transferDao(): TransferDao
+
+    abstract fun attachmentDao(): AttachmentDao
 
     companion object {
         /**
@@ -238,6 +241,46 @@ abstract class MoneyDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v6 lets a note carry pictures — a struk, an invoice, a transfer
+         * receipt.
+         *
+         * Only the description of each picture lives here. The bytes sit in the
+         * app's own `attachments` folder under the file named by `file_name`,
+         * because a table that held a few hundred kilobytes per row would be
+         * read into memory by every query that only ever wanted a rupiah figure.
+         *
+         * Additive and empty on arrival: an install that upgrades has no
+         * lampiran yet, and every note it already holds is untouched.
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `attachments` (" +
+                        "`id` TEXT NOT NULL, " +
+                        "`transaction_id` TEXT NOT NULL, " +
+                        "`source` TEXT NOT NULL, " +
+                        "`file_name` TEXT NOT NULL, " +
+                        "`label` TEXT NOT NULL, " +
+                        "`page` INTEGER, " +
+                        "`width` INTEGER NOT NULL, " +
+                        "`height` INTEGER NOT NULL, " +
+                        "`size_bytes` INTEGER NOT NULL, " +
+                        "`position` INTEGER NOT NULL, " +
+                        "`created_at` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_attachments_transaction_id` " +
+                        "ON `attachments` (`transaction_id`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_attachments_position` " +
+                        "ON `attachments` (`position`)"
+                )
+            }
+        }
+
         @Volatile
         private var instance: MoneyDatabase? = null
 
@@ -248,7 +291,13 @@ abstract class MoneyDatabase : RoomDatabase() {
                     MoneyDatabase::class.java,
                     NAME,
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6,
+                    )
                     .build()
                     .also { instance = it }
             }

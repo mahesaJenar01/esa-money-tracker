@@ -43,6 +43,23 @@ import com.esa.moneytracker.ui.components.SectionHeader
 import com.esa.moneytracker.ui.components.SoftCard
 import com.esa.moneytracker.ui.theme.MoneyTheme
 import com.esa.moneytracker.util.CurrencyFormatter
+import java.io.InputStream
+import java.io.OutputStream
+
+/** What the system picker should call a backup that carries pictures. */
+private const val ARCHIVE_MIME_TYPE = "application/zip"
+
+/**
+ * Roughly how big the pictures are, in the units a person thinks in.
+ *
+ * Deliberately rough: it is here so nobody is surprised by a forty-megabyte
+ * backup, and "38 MB" answers that as well as an exact figure would.
+ */
+private fun approximateSize(bytes: Long): String = when {
+    bytes >= 1_000_000L -> (bytes / 1_000_000L).toString() + " MB"
+    bytes >= 1_000L -> (bytes / 1_000L).toString() + " KB"
+    else -> bytes.toString() + " B"
+}
 
 /**
  * Data & cadangan: write the whole app out to a file, or read one back in.
@@ -55,8 +72,10 @@ import com.esa.moneytracker.util.CurrencyFormatter
 fun BackupScreen(
     state: BackupUiState,
     suggestedFileName: (ExportFormat) -> String,
+    suggestedArchiveName: () -> String,
     onExport: (ExportFormat, (String) -> Boolean) -> Unit,
-    onImport: (() -> String?) -> Unit,
+    onExportArchive: (() -> OutputStream?) -> Unit,
+    onImport: (() -> InputStream?) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -70,6 +89,13 @@ fun BackupScreen(
         if (uri != null) onExport(ExportFormat.JSON) { DocumentIo.writeText(context, uri, it) }
     }
 
+    // The same backup in the shape that can carry the pictures as well.
+    val saveArchive = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(ARCHIVE_MIME_TYPE),
+    ) { uri ->
+        if (uri != null) onExportArchive { DocumentIo.openOutput(context, uri) }
+    }
+
     val saveSpreadsheet = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument(ExportFormat.CSV.mimeType),
     ) { uri ->
@@ -79,7 +105,7 @@ fun BackupScreen(
     val openBackup = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
-        if (uri != null) onImport { DocumentIo.readText(context, uri) }
+        if (uri != null) onImport { DocumentIo.openInput(context, uri) }
     }
 
     Scaffold(
@@ -115,14 +141,30 @@ fun BackupScreen(
                 )
                 Spacer(Modifier.height(12.dp))
 
-                ActionRow(
-                    icon = Icons.Rounded.Download,
-                    title = "Simpan cadangan (.json)",
-                    subtitle = "Berisi semua catatan dan saldo awal. Berkas inilah " +
-                        "yang bisa diimpor kembali.",
-                    enabled = !state.busy,
-                    onClick = { saveBackup.launch(suggestedFileName(ExportFormat.JSON)) },
-                )
+                // The archive is not the default because it is not better: with
+                // no pictures to carry it is only a zipped text file, and a plain
+                // .json is the one you can open and read anywhere.
+                if (state.hasAttachments) {
+                    ActionRow(
+                        icon = Icons.Rounded.Download,
+                        title = "Simpan cadangan (.zip)",
+                        subtitle = "Berisi semua catatan, saldo awal, dan " +
+                            state.attachmentCount + " lampiran (" +
+                            approximateSize(state.attachmentBytes) + "). " +
+                            "Berkas inilah yang bisa diimpor kembali.",
+                        enabled = !state.busy,
+                        onClick = { saveArchive.launch(suggestedArchiveName()) },
+                    )
+                } else {
+                    ActionRow(
+                        icon = Icons.Rounded.Download,
+                        title = "Simpan cadangan (.json)",
+                        subtitle = "Berisi semua catatan dan saldo awal. Berkas inilah " +
+                            "yang bisa diimpor kembali.",
+                        enabled = !state.busy,
+                        onClick = { saveBackup.launch(suggestedFileName(ExportFormat.JSON)) },
+                    )
+                }
                 Spacer(Modifier.height(10.dp))
                 ActionRow(
                     icon = Icons.Rounded.TableChart,
@@ -144,17 +186,23 @@ fun BackupScreen(
                 ActionRow(
                     icon = Icons.Rounded.CloudUpload,
                     title = "Pilih berkas cadangan",
-                    subtitle = "Catatan dengan id yang sama akan diperbarui, sisanya " +
-                        "ditambahkan. Saldo awal ikut dipulihkan dari berkas.",
+                    subtitle = "Berkas .json atau .zip sama-sama diterima. Catatan " +
+                        "dengan id yang sama akan diperbarui, sisanya ditambahkan. " +
+                        "Saldo awal ikut dipulihkan dari berkas.",
                     enabled = !state.busy,
-                    onClick = { openBackup.launch(arrayOf(ExportFormat.JSON.mimeType, "*/*")) },
+                    onClick = {
+                        openBackup.launch(
+                            arrayOf(ExportFormat.JSON.mimeType, ARCHIVE_MIME_TYPE, "*/*"),
+                        )
+                    },
                 )
 
                 Spacer(Modifier.height(16.dp))
 
                 Text(
                     text = "Mengimpor berkas yang sama dua kali tidak menggandakan " +
-                        "catatan. Catatan di tempat sampah tidak ikut diekspor.",
+                        "catatan. Catatan di tempat sampah tidak ikut diekspor, dan " +
+                        "lampiran hanya ikut kalau cadangannya berbentuk .zip.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -215,6 +263,16 @@ private fun SummaryCard(state: BackupUiState) {
             label = "Bank terdaftar",
             value = state.bankCount.toString() + " bank",
         )
+        if (state.hasAttachments) {
+            Spacer(Modifier.height(10.dp))
+            Hairline()
+            Spacer(Modifier.height(10.dp))
+            SummaryLine(
+                label = "Lampiran",
+                value = state.attachmentCount.toString() + " gambar - " +
+                    approximateSize(state.attachmentBytes),
+            )
+        }
         if (state.binCount > 0) {
             Spacer(Modifier.height(10.dp))
             Hairline()

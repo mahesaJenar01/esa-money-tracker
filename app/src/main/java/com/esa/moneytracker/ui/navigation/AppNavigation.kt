@@ -38,6 +38,8 @@ import com.esa.moneytracker.ui.transfer.TransferScreen
 import com.esa.moneytracker.ui.transfer.TransferViewModel
 import com.esa.moneytracker.ui.transfer.TransfersScreen
 import com.esa.moneytracker.ui.transfer.TransfersViewModel
+import com.esa.moneytracker.ui.viewer.AttachmentViewerScreen
+import com.esa.moneytracker.ui.viewer.AttachmentViewerViewModel
 
 object Routes {
     const val HOME = "home"
@@ -73,6 +75,19 @@ object Routes {
     const val EDIT = "edit/{$EDIT_ARG}"
 
     fun edit(transactionId: String): String = "edit/$transactionId"
+
+    /**
+     * One note's lampiran, full screen, opened at a particular one.
+     *
+     * The position travels in the route rather than the picture's own id: the
+     * viewer reads the note's pictures for itself, so what it needs from the
+     * caller is only which of them was tapped.
+     */
+    const val ATTACHMENT_INDEX_ARG = "index"
+    const val ATTACHMENTS = "attachments/{$EDIT_ARG}/{$ATTACHMENT_INDEX_ARG}"
+
+    fun attachments(transactionId: String, index: Int): String =
+        "attachments/$transactionId/$index"
 }
 
 /**
@@ -131,6 +146,9 @@ private fun MainNavHost(
                 onDelete = viewModel::delete,
                 onRestore = viewModel::restore,
                 onDeleteCheck = viewModel::deleteCheck,
+                onOpenAttachment = { id, index ->
+                    navController.navigate(Routes.attachments(id, index))
+                },
                 onOpenRecords = { navController.navigate(Routes.RECORDS) },
                 onOpenBanks = { navController.navigate(Routes.BANKS) },
                 onOpenData = { navController.navigate(Routes.BACKUP) },
@@ -167,6 +185,9 @@ private fun MainNavHost(
                 onDescriptionChanged = viewModel::onDescriptionChanged,
                 onOccurredAtChanged = viewModel::onOccurredAtChanged,
                 onResetOccurredAt = viewModel::resetOccurredAt,
+                onPickAttachment = viewModel::addAttachment,
+                onCaptureAttachment = viewModel::addCapture,
+                onRemoveAttachment = { viewModel.removeAttachment(it.id) },
                 onBack = { if (!viewModel.back()) navController.popBackStack() },
                 onSubmit = viewModel::submit,
             )
@@ -185,6 +206,9 @@ private fun MainNavHost(
                 onDelete = viewModel::delete,
                 onRestore = viewModel::restore,
                 onDeleteCheck = viewModel::deleteCheck,
+                onOpenAttachment = { id, index ->
+                    navController.navigate(Routes.attachments(id, index))
+                },
                 onOpenBin = { navController.navigate(Routes.BIN) },
                 onCheckBalance = { navController.navigate(Routes.CHECK) },
             )
@@ -276,7 +300,9 @@ private fun MainNavHost(
             BackupScreen(
                 state = state,
                 suggestedFileName = viewModel::suggestedFileName,
+                suggestedArchiveName = viewModel::suggestedArchiveName,
                 onExport = viewModel::export,
+                onExportArchive = viewModel::exportArchive,
                 onImport = viewModel::importBackup,
                 onBack = { navController.popBackStack() },
             )
@@ -308,8 +334,33 @@ private fun MainNavHost(
                 onDescriptionChanged = viewModel::onDescriptionChanged,
                 onOccurredAtChanged = viewModel::onOccurredAtChanged,
                 onResetOccurredAt = viewModel::resetOccurredAt,
+                onPickAttachment = viewModel::addAttachment,
+                onCaptureAttachment = viewModel::addCapture,
+                onRemoveAttachment = viewModel::removeAttachment,
                 onBack = { navController.popBackStack() },
                 onSubmit = viewModel::submit,
+            )
+        }
+
+        composable(
+            route = Routes.ATTACHMENTS,
+            arguments = listOf(
+                navArgument(Routes.EDIT_ARG) { type = NavType.StringType },
+                navArgument(Routes.ATTACHMENT_INDEX_ARG) { type = NavType.IntType },
+            ),
+        ) { entry ->
+            val transactionId = entry.arguments?.getString(Routes.EDIT_ARG).orEmpty()
+            val index = entry.arguments?.getInt(Routes.ATTACHMENT_INDEX_ARG) ?: 0
+            val viewModel: AttachmentViewerViewModel = viewModel(
+                key = "viewer-" + transactionId,
+                factory = AttachmentViewerViewModel.factory(transactionId),
+            )
+            val state by viewModel.state.collectAsStateWithLifecycle()
+
+            AttachmentViewerScreen(
+                state = state,
+                initialIndex = index,
+                onBack = { navController.popBackStack() },
             )
         }
     }

@@ -39,10 +39,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import android.net.Uri
+import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.Category
 import com.esa.moneytracker.data.model.Pocket
 import com.esa.moneytracker.data.model.TransactionType
 import com.esa.moneytracker.ui.components.AmountField
+import com.esa.moneytracker.ui.components.AttachmentPicker
 import com.esa.moneytracker.ui.components.DescriptionField
 import com.esa.moneytracker.ui.components.FieldLabel
 import com.esa.moneytracker.ui.components.IconBadge
@@ -57,6 +60,7 @@ import com.esa.moneytracker.ui.components.DateTimeField
 import com.esa.moneytracker.ui.components.transactionNotes
 import com.esa.moneytracker.ui.theme.MoneyTheme
 import com.esa.moneytracker.util.CurrencyFormatter
+import java.io.File
 import java.time.LocalDateTime
 import java.time.ZoneId
 
@@ -79,6 +83,9 @@ fun EditScreen(
     onDescriptionChanged: (String) -> Unit,
     onOccurredAtChanged: (LocalDateTime) -> Unit,
     onResetOccurredAt: () -> Unit,
+    onPickAttachment: (Uri) -> Unit,
+    onCaptureAttachment: (File) -> Unit,
+    onRemoveAttachment: (Attachment) -> Unit,
     onBack: () -> Unit,
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier,
@@ -118,6 +125,9 @@ fun EditScreen(
                     onDescriptionChanged = onDescriptionChanged,
                     onOccurredAtChanged = onOccurredAtChanged,
                     onResetOccurredAt = onResetOccurredAt,
+                    onPickAttachment = onPickAttachment,
+                    onCaptureAttachment = onCaptureAttachment,
+                    onRemoveAttachment = onRemoveAttachment,
                     onSubmit = onSubmit,
                     zone = zone,
                 )
@@ -177,6 +187,9 @@ private fun EditForm(
     onDescriptionChanged: (String) -> Unit,
     onOccurredAtChanged: (LocalDateTime) -> Unit,
     onResetOccurredAt: () -> Unit,
+    onPickAttachment: (Uri) -> Unit,
+    onCaptureAttachment: (File) -> Unit,
+    onRemoveAttachment: (Attachment) -> Unit,
     onSubmit: () -> Unit,
     zone: ZoneId,
 ) {
@@ -349,6 +362,28 @@ private fun EditForm(
             isError = state.showErrors && state.descriptionError != null,
             errorText = state.descriptionError,
         )
+
+        Spacer(Modifier.height(18.dp))
+
+        FieldLabel("Lampiran")
+        Spacer(Modifier.height(8.dp))
+        AttachmentPicker(
+            attachments = state.attachments,
+            busy = state.attachmentBusy,
+            onPicked = onPickAttachment,
+            onCaptured = onCaptureAttachment,
+            onRemove = onRemoveAttachment,
+            footnote = "Lampiran langsung tersimpan begitu ditambah atau dihapus, " +
+                "tidak menunggu tombol simpan.",
+        )
+        if (state.attachmentMessage != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = state.attachmentMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
 
         Spacer(Modifier.height(24.dp))
 
