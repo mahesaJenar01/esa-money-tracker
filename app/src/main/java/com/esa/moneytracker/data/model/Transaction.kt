@@ -31,6 +31,14 @@ data class Transaction(
     val bankId: String?,
     val amount: Long,
     val description: String,
+    /**
+     * The [Subscription] that wrote this note, or null when a person did.
+     *
+     * A label and nothing more — an automatic charge counts towards every
+     * balance and every analytic exactly like a typed one, and can be edited or
+     * deleted just the same.
+     */
+    val subscriptionId: String? = null,
     val occurredAt: Instant,
     val createdAt: Instant,
     val updatedAt: Instant? = null,
@@ -45,6 +53,9 @@ data class Transaction(
 
     /** True once the note has been rewritten at least once. */
     val edited: Boolean get() = updatedAt != null
+
+    /** True when the app wrote this note itself, from a recurring bill. */
+    val fromSubscription: Boolean get() = subscriptionId != null
 
     /**
      * True when the note was written about something that had already happened.

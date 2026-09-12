@@ -46,6 +46,11 @@ rupiah.
 - **Pindah dana** — money moved between your own pockets: bank to bank, *setor
   tunai*, *tarik tunai*. It is not income and not an expense, it has its own
   history, and it never appears in Riwayat. See [Pindah dana](#pindah-dana).
+- **Langganan** — the bills that arrive on their own. Say once that YouTube is
+  100 ribu on the 2nd and Claude is 400 ribu on the 4th, and two things follow:
+  the note for each is written by itself when its day comes round, and the home
+  screen says what all of them together cost every month — 500 ribu — before the
+  month has started. See [Langganan](#langganan).
 - **Catat** — the floating button opens a three-step flow, or leaves it at the
   first step for a transfer:
   1. Pemasukan, Pengeluaran, or Pindah Dana?
@@ -67,30 +72,31 @@ rupiah.
 ```
 app/src/main/java/com/esa/moneytracker/
 ├── data/
-│   ├── model/        Transaction, TransactionType, Pocket, Category, Bank,
-│   │                 OnlinePocket, BalanceCheck, Attachment
-│   ├── local/        Room entities, DAOs, database and its migrations
-│   ├── attachment/   the files behind the lampiran, and the PDF renderer
-│   ├── repository/   TransactionRepository — the only way in or out of storage
-│   └── export/       BackupDocument, TransactionExportRecord, ExportFormat,
-│                     BackupArchive
+│   ├── model/         Transaction, TransactionType, Pocket, Category, Bank,
+│   │                  OnlinePocket, BalanceCheck, Attachment, Subscription
+│   ├── local/         Room entities, DAOs, database and its migrations
+│   ├── attachment/    the files behind the lampiran, and the PDF renderer
+│   ├── repository/    TransactionRepository — the only way in or out of storage
+│   └── export/        BackupDocument, TransactionExportRecord, ExportFormat,
+│                      BackupArchive
 ├── ui/
-│   ├── theme/        colours, type scale, shapes, semantic MoneyColors
-│   ├── components/   reusable pieces (balance header, rows, badges, form fields)
-│   ├── setup/        the opening-balance question and the gate that shows it
-│   ├── banks/        the bank page and every dialog that changes one
-│   ├── transfer/     pindah dana — the form and its own history
-│   ├── check/        cek saldo — the reconciliation that leaves a mark
-│   ├── backup/       data & cadangan — export, import, document reading
-│   ├── home/         home screen, its sections, HomeViewModel
-│   ├── entry/        the three-step input flow, EntryViewModel
-│   ├── edit/         the single-page edit screen
-│   ├── records/      the week-by-week full history
-│   ├── viewer/       one lampiran, full screen, pinch to zoom
-│   ├── bin/          catatan terhapus, the 30-day bin
-│   └── navigation/   NavHost wiring
-└── util/             rupiah formatting, Indonesian dates, AnalyticsPeriod,
-                      WeekWindow, Images
+│   ├── theme/         colours, type scale, shapes, semantic MoneyColors
+│   ├── components/    reusable pieces (balance header, rows, badges, form fields)
+│   ├── setup/         the opening-balance question and the gate that shows it
+│   ├── banks/         the bank page and every dialog that changes one
+│   ├── transfer/      pindah dana — the form and its own history
+│   ├── subscriptions/ langganan — the plans and what they add up to
+│   ├── check/         cek saldo — the reconciliation that leaves a mark
+│   ├── backup/        data & cadangan — export, import, document reading
+│   ├── home/          home screen, its sections, HomeViewModel
+│   ├── entry/         the three-step input flow, EntryViewModel
+│   ├── edit/          the single-page edit screen
+│   ├── records/       the week-by-week full history
+│   ├── viewer/        one lampiran, full screen, pinch to zoom
+│   ├── bin/           catatan terhapus, the 30-day bin
+│   └── navigation/    NavHost wiring
+└── util/              rupiah formatting, Indonesian dates, AnalyticsPeriod,
+                       WeekWindow, Images
 ```
 
 ## Banks
@@ -180,6 +186,123 @@ Editing and deleting work like a note's: the date only moves when you move it,
 an edit leaves a *pernah diubah* mark rather than jumping the row to today, and
 deleting puts it in the same 30-day bin — where restoring it puts the money back
 exactly where it was.
+
+## Langganan
+
+Some money leaves whether or not anybody remembers it. A subscription is billed
+on the same day every month, for the same amount, and the only thing that ever
+changes about it is whether it got written down. So it is described once, as a
+plan, and the app does the writing.
+
+A plan is **not** a record of money moving. It is the statement that money *will*
+move, and what it produces is ordinary notes:
+
+```
+langganan  →  (tanggalnya tiba)  →  catatan biasa di Riwayat
+```
+
+Each charge is a normal `transactions` row with a normal category, a normal
+description — the plan's name — and a normal amount, so it counts towards the
+balance, the weekly analytics and the category breakdown exactly like a typed
+one, and can be edited or deleted exactly like one. Nothing anywhere in the app
+reads a balance out of the `subscriptions` table, which is what makes it
+impossible for a plan and the history to disagree.
+
+### When the charge gets written
+
+When the app is next opened, and **dated to the moment the bill was actually
+due**. A bill on the 2nd that nobody opened the app for until the 5th lands on
+the 2nd in Riwayat, where it belongs — not on the 5th.
+
+That is the whole reason there is no alarm, no scheduler and no background
+permission. An alarm would only have made the row *appear* sooner; it would not
+have changed a single figure, because the row it writes says the 2nd either way.
+What it would have added is a battery argument and one more thing to go wrong on
+a phone that doses its background work.
+
+The catch-up runs on launch and again every time the app comes back to the
+foreground — a process can stay alive for days, so launch alone would leave a
+bill unwritten until the app was killed. Running it twice is harmless, and that
+is the point:
+
+> `charged_through` — every due moment on or before this has already been
+> written down.
+
+One column, and a charge cannot be written twice no matter how often anything
+runs. It starts at the moment the plan was created, which is the other promise
+the feature makes: **the app only records bills from the day it was told about
+them.** A subscription added on the 13th does not invent the one that was paid on
+the 2nd — that is history, and history is typed in through Catat where it can be
+seen and checked.
+
+### The schedule
+
+| Cycle | Asks for | Lands on |
+| --- | --- | --- |
+| Bulanan | a day of the month, 1–31 | that day, every month |
+| Mingguan | a weekday | that weekday, every week |
+
+A bill on the 31st is charged on the **28th of February** rather than skipping
+the month: the day is clamped to the length of the month it lands in, because a
+subscription that bills twelve times a year does not stop doing so in February.
+The form says as much once a day past the 28th is picked.
+
+The time of day is asked for too, and it is not decoration: it is what makes
+"has this one been charged yet?" an exact comparison rather than a question about
+which end of the day a date means.
+
+### The accumulation
+
+Two bills on different days of the month are still one number of rupiah leaving
+every month, and that number is worth knowing before the month starts rather
+than after it has gone. So the page leads with it, and so does a card on the
+home screen, right under the balance — a balance says how much money there is
+and cannot say how much of it is already promised to somebody else.
+
+A weekly bill has no exact monthly figure; there is no whole number of weeks in a
+month. It is converted at **52 weeks to 12 months**, so 30 ribu a week reads as
+130 ribu a month — not the 120 ribu that "four weeks in a month" would claim, and
+which would be 360 ribu a year short. The same rate runs the other way for the
+per-week figure, and both are marked as averages where they appear.
+
+Beside the average sits the calendar answer: what actually falls inside *this*
+month, and how much of that has not come due yet. The two disagree in any month
+where a weekly bill lands five times, and they are both true — one is the rate,
+the other is the month.
+
+### Pausing, editing and deleting
+
+**Jeda** stops a plan charging without forgetting it. Pausing settles the
+watermark to now and resuming settles it again, so the stretch in between is
+never billed — which is the only honest reading of "pause": a subscription you
+stopped paying for a month did not quietly run up a month of charges. A paused
+plan is left out of every total, because a plan that is not charging is not money
+leaving.
+
+**Editing** never touches the watermark. Changing the price or the billing day
+therefore takes effect from the next due moment after whatever has already been
+settled: it can neither re-charge a month that was paid nor skip one that was
+not. Because that is genuinely hard to work out in your head, the form previews
+it — the card at the bottom names the next bill as it *would* be after the
+change, including when the change pulls it into the past and the charge is
+written the moment it is saved. Notes the plan has already written are left
+exactly as they are; rewriting last month's charge because the price went up
+would be rewriting history.
+
+**Deleting** leaves every note the plan wrote standing, for the same reason
+deleting a *cek saldo* mark leaves its note standing: those notes are claims
+about money that really left, and removing them would silently change every
+balance since. The plan itself goes to the same 30-day soft delete as everything
+else, with the undo in the snackbar right after the delete — it is not listed in
+*Catatan terhapus*, because the bin is for records of money, and a plan is not
+one.
+
+**A closed bank** stalls a plan rather than breaking it. Notes in a closed bank
+count towards no balance, so charging one would quietly drop the money out of
+every figure in the app; instead the plan stops, says so on its row, and writes
+everything it missed as soon as another bank is picked. Closing a bank *onto*
+another one repoints the plan automatically, exactly as it repoints the notes and
+the transfers.
 
 ## The three timestamps
 
@@ -367,7 +490,7 @@ anywhere else.
 
 | Format | Contains | Importable |
 | --- | --- | --- |
-| `.json` | opening balances, banks, balance checks, transfers **and** every live note | yes |
+| `.json` | opening balances, banks, balance checks, transfers, langganan **and** every live note | yes |
 | `.zip` | the same `.json`, plus every lampiran as a file beside it | yes |
 | `.csv` | one row per note, nothing else | no — for spreadsheets |
 
@@ -400,9 +523,9 @@ balance in the file replaces the current one — restoring a backup that did not
 restore the starting balances would leave every total wrong. Notes in the 30-day
 bin are not exported; closed banks are, because live notes still point at them.
 
-Format version 4 added the transfers and version 5 the lampiran; a file written
-before either simply has none, which is not the same as "they were deleted" — an
-import only ever adds and replaces.
+Format version 4 added the transfers, version 5 the lampiran and version 6 the
+langganan; a file written before any of them simply has none, which is not the
+same as "they were deleted" — an import only ever adds and replaces.
 
 **Old files still work.** A file written before format version 3 carries no
 balance checks, which means the backup predates the mark rather than that the
@@ -426,10 +549,10 @@ screen is gating on, so the app moves straight on with the restored data.
 ### The shapes involved
 
 - `BackupDocument` is the file: `app`, `format_version`, `exported_at`, the
-  opening balance, the banks, the transactions, the balance checks and the
-  transfers. Unknown JSON keys are ignored on read, so a file written by a later
-  version still loads what it can, and a missing `banks` array is what marks a
-  file as pre-bank.
+  opening balance, the banks, the transactions, the balance checks, the
+  transfers and the subscriptions. Unknown JSON keys are ignored on read, so a
+  file written by a later version still loads what it can, and a missing `banks`
+  array is what marks a file as pre-bank.
 - `BalanceCheckExportRecord` is one reconciliation, with its per-bank lines
   nested inside it rather than in a second array — a check without its lines says
   almost nothing, and the two halves are written and read as one. Its lines are
@@ -443,6 +566,12 @@ screen is gating on, so the app moves straight on with the restored data.
   exists and everything about which bank holds it, so a backup without them
   would put the right total in the wrong places. A row whose two ends are the
   same is skipped — it would move nothing.
+- `SubscriptionExportRecord` is one recurring bill, and it carries
+  `charged_through` with it. That field is the one that matters on the way back
+  in: a plan restored without it would look as though none of its bills had ever
+  been written, and the next launch would charge every one of them again — on top
+  of the very notes the same file just put back. A plan with no name, no money or
+  no readable creation stamp is skipped rather than written.
 - `AttachmentExportRecord` is one lampiran — its description only. The picture
   is a separate entry in the archive, which is the whole reason a backup with
   pictures is a `.zip`: a photo written into JSON has to be base64, inflating it

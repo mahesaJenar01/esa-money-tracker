@@ -19,6 +19,11 @@ data class ImportResult(
      */
     val attachmentsImported: Int = 0,
     /**
+     * Recurring bills restored, each with the watermark saying how far it had
+     * already charged — without which the next launch would bill them all again.
+     */
+    val subscriptionsImported: Int = 0,
+    /**
      * The bank a pre-bank file's Online balance was folded into, when that
      * happened, so the screen can say the data has been moved onto the new
      * system and name where it went.

@@ -26,6 +26,7 @@ class MoneyTrackerApp : Application() {
             database.balanceCheckDao(),
             database.transferDao(),
             database.attachmentDao(),
+            database.subscriptionDao(),
             AttachmentStore(this),
         )
     }
@@ -47,5 +48,26 @@ class MoneyTrackerApp : Application() {
             // open, so nothing is half-written.
             repository.sweepAttachments()
         }
+        catchUpSubscriptions()
+    }
+
+    /**
+     * Writes down every recurring bill that has come due since the app last
+     * looked.
+     *
+     * Called here and again from [MainActivity] every time the app comes back to
+     * the foreground, because a process can stay alive for days and `onCreate`
+     * would then only run once a week. Both calls are cheap and neither can
+     * write a charge twice — the plan's own watermark decides that, not the
+     * caller.
+     *
+     * Each charge is dated to the moment the bill was *due*, so opening the app
+     * on the 5th puts a bill from the 2nd on the 2nd rather than pretending it
+     * is today. That is what makes a background alarm unnecessary: an alarm
+     * would only have made the row appear sooner, at the cost of a scheduler, a
+     * permission and a battery argument.
+     */
+    fun catchUpSubscriptions() {
+        scope.launch { repository.runDueSubscriptions() }
     }
 }

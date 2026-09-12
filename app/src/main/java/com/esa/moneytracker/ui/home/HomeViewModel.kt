@@ -10,11 +10,13 @@ import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.Bank
 import com.esa.moneytracker.data.model.OpeningBalances
+import com.esa.moneytracker.data.model.SubscriptionUsage
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.data.model.TransactionType
 import com.esa.moneytracker.data.model.Transfer
 import com.esa.moneytracker.data.model.cashBalanceOf
 import com.esa.moneytracker.data.model.onlinePocketOf
+import com.esa.moneytracker.data.model.subscriptionTotalsOf
 import com.esa.moneytracker.data.repository.TransactionRepository
 import com.esa.moneytracker.util.AnalyticsPeriod
 import com.esa.moneytracker.util.IndonesianDates
@@ -25,9 +27,24 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
+
+/**
+ * The four lists that hang off the history, carried as one.
+ *
+ * `combine` takes five flows and the home screen needs eight, so these travel
+ * together — they are all read from the same notes and none of them is useful
+ * without the others.
+ */
+private data class HomeInputs(
+    val transactions: List<Transaction>,
+    val transfers: List<Transfer>,
+    val attachments: Map<String, List<Attachment>>,
+    val subscriptions: List<SubscriptionUsage>,
+)
 
 class HomeViewModel(
     private val repository: TransactionRepository,
@@ -39,22 +56,24 @@ class HomeViewModel(
     val state: StateFlow<HomeUiState> =
         combine(
             // Grouped up because `combine` takes five flows and this needs
-            // seven. Notes, transfers and lampiran all hang off the same list:
-            // every balance on this screen is worked out from the first two, and
-            // the third is what the rows draw.
+            // eight. Notes, transfers and lampiran all hang off the same list:
+            // every balance on this screen is worked out from the first two, the
+            // third is what the rows draw, and the plans are what says how much
+            // of the balance is already spoken for.
             combine(
                 repository.observeAll(),
                 repository.observeTransfers(),
                 repository.observeAttachments(),
-            ) { transactions, transfers, attachments ->
-                Triple(transactions, transfers, attachments)
+                repository.observeSubscriptionUsage(zone),
+            ) { transactions, transfers, attachments, subscriptions ->
+                HomeInputs(transactions, transfers, attachments, subscriptions)
             },
             repository.observeOpeningBalances(),
             repository.observeBanks(),
             repository.observeBalanceChecks(),
             selectedPeriod,
-        ) { (transactions, transfers, attachments), opening, banks, checks, period ->
-            buildState(transactions, transfers, attachments, opening, banks, checks, period)
+        ) { inputs, opening, banks, checks, period ->
+            buildState(inputs, opening, banks, checks, period)
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -80,14 +99,13 @@ class HomeViewModel(
     }
 
     private fun buildState(
-        transactions: List<Transaction>,
-        transfers: List<Transfer>,
-        attachments: Map<String, List<Attachment>>,
+        inputs: HomeInputs,
         opening: OpeningBalances,
         banks: List<Bank>,
         checks: List<BalanceCheck>,
         period: AnalyticsPeriod,
     ): HomeUiState {
+        val (transactions, transfers, attachments, subscriptions) = inputs
         val today = LocalDate.now(zone)
 
         // Online is never a figure of its own: it is whatever the open banks add
@@ -141,6 +159,17 @@ class HomeViewModel(
             periodCount = inPeriod.size,
             breakdown = breakdown,
             latest = transactions.firstOrNull(),
+            subscriptions = subscriptionTotalsOf(
+                subscriptions = subscriptions.map { it.subscription },
+                today = today,
+                now = Instant.now(),
+                zone = zone,
+            ),
+            // The one that lands first, so the card can name it rather than
+            // leaving the user to open the page and work it out.
+            nextBill = subscriptions
+                .filter { it.nextDue != null && !it.subscription.paused }
+                .minByOrNull { it.nextDue!! },
             days = historyDays(thisWeek, checksThisWeek, zone, today),
             weekRangeLabel = week.rangeLabel,
             hasOlderRecords = thisWeek.size < transactions.size,

@@ -67,6 +67,23 @@ interface TransactionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(transactions: List<TransactionEntity>)
 
+    /**
+     * How many notes each subscription has written, live ones only.
+     *
+     * Counted rather than stored on the plan: a charge the user deleted stopped
+     * being money that left, and a figure kept on the plan would go on claiming
+     * it did.
+     */
+    @Query(
+        """
+        SELECT subscription AS subscriptionId, COUNT(*) AS charges, SUM(amount) AS total
+        FROM transactions
+        WHERE deleted_at IS NULL AND subscription IS NOT NULL
+        GROUP BY subscription
+        """
+    )
+    fun observeSubscriptionCharges(): Flow<List<SubscriptionChargeCount>>
+
     /** Ids already on file, so an import can say what it added and what it replaced. */
     @Query("SELECT id FROM transactions")
     suspend fun allIds(): List<String>
@@ -115,3 +132,10 @@ interface TransactionDao {
     @Query("DELETE FROM transactions WHERE deleted_at IS NOT NULL AND deleted_at < :cutoff")
     suspend fun purgeDeletedBefore(cutoff: Long): Int
 }
+
+/** One row of [TransactionDao.observeSubscriptionCharges]. */
+data class SubscriptionChargeCount(
+    val subscriptionId: String,
+    val charges: Int,
+    val total: Long,
+)

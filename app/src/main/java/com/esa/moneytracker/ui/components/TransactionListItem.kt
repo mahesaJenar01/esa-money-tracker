@@ -131,7 +131,16 @@ fun transactionNotes(transaction: Transaction, zone: ZoneId): List<String> = bui
     val created = transaction.createdDateTimeIn(zone)
     add("Dibuat " + IndonesianDates.dayAndDate(created.toLocalDate()) + " • " + stamp(created))
 
-    if (transaction.timeAdjusted) {
+    // A charge the app wrote itself is always "late" by this measure — it is
+    // written the first time the app is opened after the bill was due — so it
+    // says where it came from instead of implying the user forgot something.
+    if (transaction.fromSubscription) {
+        val occurred = transaction.dateTimeIn(zone)
+        add(
+            "Otomatis dari langganan — jatuh tempo " +
+                IndonesianDates.dayAndDate(occurred.toLocalDate()) + " • " + stamp(occurred),
+        )
+    } else if (transaction.timeAdjusted) {
         val occurred = transaction.dateTimeIn(zone)
         add(
             "Dicatat menyusul — transaksinya " +

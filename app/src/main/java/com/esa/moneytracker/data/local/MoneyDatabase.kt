@@ -16,8 +16,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BalanceCheckItemEntity::class,
         TransferEntity::class,
         AttachmentEntity::class,
+        SubscriptionEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class MoneyDatabase : RoomDatabase() {
@@ -33,6 +34,8 @@ abstract class MoneyDatabase : RoomDatabase() {
     abstract fun transferDao(): TransferDao
 
     abstract fun attachmentDao(): AttachmentDao
+
+    abstract fun subscriptionDao(): SubscriptionDao
 
     companion object {
         /**
@@ -281,6 +284,58 @@ abstract class MoneyDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v7 adds the recurring bills — the plans behind Langganan.
+         *
+         * The table holds plans, never money. What moves money is the ordinary
+         * note the app writes when a due moment passes, and `charged_through` is
+         * the single column that keeps it from writing the same one twice.
+         *
+         * `transactions.subscription` is the other half: a note that says which
+         * plan produced it. Null on every row that already exists, which is
+         * exactly right — they were all typed by hand.
+         *
+         * Purely additive. An install that upgrades has no plans yet and every
+         * balance stays what it was.
+         */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `transactions` ADD COLUMN `subscription` TEXT")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_transactions_subscription` " +
+                        "ON `transactions` (`subscription`)"
+                )
+
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `subscriptions` (" +
+                        "`id` TEXT NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`amount` INTEGER NOT NULL, " +
+                        "`category` TEXT NOT NULL, " +
+                        "`pocket` TEXT NOT NULL, " +
+                        "`bank` TEXT, " +
+                        "`cycle` TEXT NOT NULL, " +
+                        "`day_of_month` INTEGER NOT NULL, " +
+                        "`day_of_week` INTEGER NOT NULL, " +
+                        "`time_minutes` INTEGER NOT NULL, " +
+                        "`charged_through` INTEGER NOT NULL, " +
+                        "`paused_at` INTEGER, " +
+                        "`created_at` INTEGER NOT NULL, " +
+                        "`updated_at` INTEGER, " +
+                        "`deleted_at` INTEGER, " +
+                        "PRIMARY KEY(`id`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_subscriptions_deleted_at` " +
+                        "ON `subscriptions` (`deleted_at`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_subscriptions_bank` " +
+                        "ON `subscriptions` (`bank`)"
+                )
+            }
+        }
+
         @Volatile
         private var instance: MoneyDatabase? = null
 
@@ -297,6 +352,7 @@ abstract class MoneyDatabase : RoomDatabase() {
                         MIGRATION_3_4,
                         MIGRATION_4_5,
                         MIGRATION_5_6,
+                        MIGRATION_6_7,
                     )
                     .build()
                     .also { instance = it }

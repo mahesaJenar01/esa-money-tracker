@@ -194,6 +194,72 @@ fun DateTimeField(
     }
 }
 
+/**
+ * A time of day on its own, with no date attached.
+ *
+ * What a recurring bill needs: the day it lands is decided by the schedule, so
+ * the only thing left to ask is what time. It reuses the same dialog as the
+ * date-and-time card so the two never drift apart.
+ */
+@Composable
+fun TimeOfDayField(
+    value: LocalTime,
+    onChange: (LocalTime) -> Unit,
+    modifier: Modifier = Modifier,
+    caption: String = "Jam tagihan dicatat",
+) {
+    val colors = MoneyTheme.colors
+    var picking by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(colors.surfaceElevated)
+            .border(1.dp, colors.hairline, RoundedCornerShape(18.dp))
+            .clickable { picking = true }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Schedule,
+            contentDescription = null,
+            tint = colors.muted,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = IndonesianDates.time(value),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = caption,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(
+            imageVector = Icons.Rounded.EditCalendar,
+            contentDescription = "Ubah jam",
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+
+    if (picking) {
+        TimeDialog(
+            initial = value,
+            onDismiss = { picking = false },
+            onPicked = {
+                onChange(it)
+                picking = false
+            },
+        )
+    }
+}
+
 private enum class PickerStep { NONE, DATE, TIME }
 
 @OptIn(ExperimentalMaterial3Api::class)

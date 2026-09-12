@@ -111,6 +111,43 @@ fun AmountField(
     )
 }
 
+/**
+ * One line of text — a name, a label, anything that is not a sentence.
+ *
+ * Beside [DescriptionField] rather than inside it: a description invites a
+ * sentence and is given two lines to write it in, while a name is one line and
+ * a `Done` key.
+ */
+@Composable
+fun SingleLineField(
+    value: String,
+    onValueChanged: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    isError: Boolean = false,
+    errorText: String? = null,
+    helperText: String = "Wajib diisi.",
+    imeAction: ImeAction = ImeAction.Next,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChanged,
+        modifier = modifier.fillMaxWidth(),
+        placeholder = { Text(placeholder) },
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.Words,
+            imeAction = imeAction,
+        ),
+        singleLine = true,
+        isError = isError,
+        supportingText = {
+            if (isError && errorText != null) Text(errorText) else Text(helperText)
+        },
+        shape = RoundedCornerShape(18.dp),
+        colors = moneyFieldColors(),
+    )
+}
+
 @Composable
 fun DescriptionField(
     value: String,

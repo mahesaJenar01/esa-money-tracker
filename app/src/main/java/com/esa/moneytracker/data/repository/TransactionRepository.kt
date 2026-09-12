@@ -9,6 +9,7 @@ import com.esa.moneytracker.data.export.BackupDocument
 import com.esa.moneytracker.data.export.BalanceCheckExportRecord
 import com.esa.moneytracker.data.export.BankExportRecord
 import com.esa.moneytracker.data.export.ImportResult
+import com.esa.moneytracker.data.export.SubscriptionExportRecord
 import com.esa.moneytracker.data.export.TransactionExportRecord
 import com.esa.moneytracker.data.export.TransferExportRecord
 import com.esa.moneytracker.data.local.AttachmentDao
@@ -19,6 +20,7 @@ import com.esa.moneytracker.data.local.BankDao
 import com.esa.moneytracker.data.local.BankEntity
 import com.esa.moneytracker.data.local.OpeningBalanceDao
 import com.esa.moneytracker.data.local.OpeningBalanceEntity
+import com.esa.moneytracker.data.local.SubscriptionDao
 import com.esa.moneytracker.data.local.TransactionDao
 import com.esa.moneytracker.data.local.TransactionEntity
 import com.esa.moneytracker.data.local.TransferDao
@@ -31,19 +33,26 @@ import com.esa.moneytracker.data.model.Bank
 import com.esa.moneytracker.data.model.BankClosure
 import com.esa.moneytracker.data.model.BankColor
 import com.esa.moneytracker.data.model.BankFunding
+import com.esa.moneytracker.data.model.BillingCycle
 import com.esa.moneytracker.data.model.Category
 import com.esa.moneytracker.data.model.OpeningBalances
 import com.esa.moneytracker.data.model.Pocket
+import com.esa.moneytracker.data.model.Subscription
+import com.esa.moneytracker.data.model.SubscriptionUsage
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.data.model.TransactionType
 import com.esa.moneytracker.data.model.Transfer
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import android.net.Uri
 import java.io.File
+import java.time.DayOfWeek
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
 import kotlin.math.abs
@@ -89,9 +98,13 @@ class TransactionRepository(
     private val balanceCheckDao: BalanceCheckDao,
     private val transferDao: TransferDao,
     private val attachmentDao: AttachmentDao,
+    private val subscriptionDao: SubscriptionDao,
     /** The files behind the lampiran; the database only ever holds their names. */
     private val attachments: AttachmentStore,
 ) {
+
+    /** Holds the subscription catch-up to one run at a time. See [runDueSubscriptions]. */
+    private val subscriptionRuns = Mutex()
 
     fun observeAll(): Flow<List<Transaction>> =
         dao.observeAll().map { rows -> rows.map { it.toDomain() } }
@@ -217,6 +230,8 @@ class TransactionRepository(
         description: String,
         /** Null means "right now", and is what makes an untouched note say so. */
         occurredAt: Instant? = null,
+        /** Set only by the subscription runner; a typed note never carries one. */
+        subscriptionId: String? = null,
     ): Transaction {
         // One Instant for both stamps when the time was not chosen, so
         // Transaction.timeAdjusted is an exact comparison rather than a guess
@@ -231,6 +246,7 @@ class TransactionRepository(
             bankId = bankId.takeIf { pocket == Pocket.ONLINE },
             amount = amount,
             description = description.trim(),
+            subscriptionId = subscriptionId,
             occurredAt = occurredAt ?: now,
             createdAt = now,
         )
@@ -291,7 +307,9 @@ class TransactionRepository(
      */
     suspend fun purgeExpiredDeleted(now: Instant = Instant.now()): Int {
         val cutoff = now.minus(Duration.ofDays(TransactionEntity.RETENTION_DAYS)).toEpochMilli()
-        return dao.purgeDeletedBefore(cutoff) + transferDao.purgeDeletedBefore(cutoff)
+        return dao.purgeDeletedBefore(cutoff) +
+            transferDao.purgeDeletedBefore(cutoff) +
+            subscriptionDao.purgeDeletedBefore(cutoff)
     }
 
     // ------------------------------------------------------------------ banks
@@ -367,6 +385,10 @@ class TransactionRepository(
             transferDao.reassignSource(fromBankId = id, toBankId = closure.targetBankId)
             transferDao.reassignDestination(fromBankId = id, toBankId = closure.targetBankId)
             transferDao.dropSelfTransfers()
+            // A recurring bill points at the bank that pays it, so it follows
+            // the money too — otherwise the plan would go on charging a bank
+            // that no longer counts towards any balance.
+            subscriptionDao.reassignBank(fromBankId = id, toBankId = closure.targetBankId)
             bankDao.addAdjustment(
                 id = closure.targetBankId,
                 delta = bank.openingBalance + bank.adjustment,
@@ -573,6 +595,238 @@ class TransactionRepository(
 
     suspend fun restoreTransfer(id: String) = transferDao.restore(id)
 
+    // ----------------------------------------------------------- subscriptions
+
+    /** Every live plan — the ones that are running and the ones that are paused. */
+    fun observeSubscriptions(): Flow<List<Subscription>> =
+        subscriptionDao.observeAll().map { rows -> rows.map { it.toDomain() } }
+
+    /**
+     * Every plan with what it has actually cost so far and when it next bills.
+     *
+     * The charge count comes from the notes rather than from a figure kept on
+     * the plan: a charge the user deleted stopped being money that left, and a
+     * stored count would go on claiming it did.
+     */
+    fun observeSubscriptionUsage(
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): Flow<List<SubscriptionUsage>> =
+        combine(
+            subscriptionDao.observeAll(),
+            dao.observeSubscriptionCharges(),
+            bankDao.observeAll(),
+        ) { rows, charges, banks ->
+            val counts = charges.associateBy { it.subscriptionId }
+            val openBanks = banks.filter { it.archivedAt == null }.map { it.id }.toSet()
+            rows.map { row ->
+                val subscription = row.toDomain()
+                SubscriptionUsage(
+                    subscription = subscription,
+                    chargeCount = counts[subscription.id]?.charges ?: 0,
+                    // Read off the watermark and nothing else, so this says
+                    // exactly what the catch-up run will do next rather than a
+                    // second opinion about it. In the ordinary case the run has
+                    // just finished and the answer is in the future; when it is
+                    // not, there really is a charge waiting to be written.
+                    nextDue = if (subscription.paused) {
+                        null
+                    } else {
+                        subscription.nextDueAfter(subscription.chargedThrough, zone)
+                    },
+                    bankMissing = subscription.pocket == Pocket.ONLINE &&
+                        subscription.bankId !in openBanks,
+                )
+            }
+        }
+
+    suspend fun findSubscription(id: String): Subscription? =
+        subscriptionDao.findById(id)?.toDomain()
+
+    /**
+     * Starts watching a recurring bill.
+     *
+     * The watermark starts at [now], which is the promise the feature makes: the
+     * app records bills from the moment it is told about them and never invents
+     * a backlog of ones that were already paid. A bill that came due earlier
+     * today is therefore not written — it is history, and history is typed in
+     * through Catat where it can be seen and checked.
+     */
+    suspend fun addSubscription(
+        name: String,
+        amount: Long,
+        category: Category,
+        pocket: Pocket,
+        bankId: String?,
+        cycle: BillingCycle,
+        dayOfMonth: Int,
+        dayOfWeek: DayOfWeek,
+        timeOfDay: LocalTime,
+        now: Instant = Instant.now(),
+    ): Subscription? {
+        if (amount <= 0L || name.isBlank()) return null
+        val subscription = Subscription(
+            id = UUID.randomUUID().toString(),
+            name = name.trim(),
+            amount = amount,
+            categoryId = category.id,
+            pocket = pocket,
+            bankId = bankId.takeIf { pocket == Pocket.ONLINE },
+            cycle = cycle,
+            dayOfMonth = dayOfMonth.coerceIn(Subscription.DAYS_OF_MONTH),
+            dayOfWeek = dayOfWeek,
+            timeOfDay = timeOfDay,
+            chargedThrough = now,
+            createdAt = now,
+        )
+        subscriptionDao.upsert(subscription.toEntity())
+        return subscription
+    }
+
+    /**
+     * Rewrites a plan in place.
+     *
+     * The watermark is left exactly where it is, so editing never re-charges a
+     * bill that was already written and never skips one that was not. Changing
+     * the billing day therefore takes effect from the next due moment after
+     * whatever has already been settled — which is what the form previews
+     * before the change is saved.
+     *
+     * Notes the plan has already written are untouched. They are records of
+     * money that moved on a day; rewriting them because the price went up would
+     * be rewriting history.
+     */
+    suspend fun updateSubscription(
+        original: Subscription,
+        name: String,
+        amount: Long,
+        category: Category,
+        pocket: Pocket,
+        bankId: String?,
+        cycle: BillingCycle,
+        dayOfMonth: Int,
+        dayOfWeek: DayOfWeek,
+        timeOfDay: LocalTime,
+        now: Instant = Instant.now(),
+    ): Subscription? {
+        if (amount <= 0L || name.isBlank()) return null
+        val updated = original.copy(
+            name = name.trim(),
+            amount = amount,
+            categoryId = category.id,
+            pocket = pocket,
+            bankId = bankId.takeIf { pocket == Pocket.ONLINE },
+            cycle = cycle,
+            dayOfMonth = dayOfMonth.coerceIn(Subscription.DAYS_OF_MONTH),
+            dayOfWeek = dayOfWeek,
+            timeOfDay = timeOfDay,
+            updatedAt = now,
+        )
+        subscriptionDao.upsert(updated.toEntity())
+        return updated
+    }
+
+    /**
+     * Stops a plan charging, without forgetting it.
+     *
+     * Pausing settles the watermark to [now] and resuming settles it again, so
+     * the stretch in between is never billed. That is the only reading of
+     * "pause" that makes sense: a subscription you stopped paying for a month
+     * did not quietly run up a month of charges.
+     */
+    suspend fun pauseSubscription(id: String, now: Instant = Instant.now()) =
+        subscriptionDao.pause(id, now.toEpochMilli(), now.toEpochMilli())
+
+    suspend fun resumeSubscription(id: String, now: Instant = Instant.now()) =
+        subscriptionDao.resume(id, now.toEpochMilli())
+
+    /**
+     * Moves a plan to the bin, and leaves every note it wrote standing.
+     *
+     * Same grammar as deleting a balance-check mark: those notes are claims
+     * about money that actually left, so removing them would silently change
+     * every balance since. Delete them one by one from Riwayat if they really
+     * were wrong.
+     */
+    suspend fun deleteSubscription(id: String, now: Instant = Instant.now()) =
+        subscriptionDao.softDelete(id, now.toEpochMilli())
+
+    suspend fun restoreSubscription(id: String) = subscriptionDao.restore(id)
+
+    /**
+     * Writes down every bill that has come due since the app last looked.
+     *
+     * This is the whole of the automation, and it runs on launch and whenever
+     * the app comes back to the foreground rather than from a background alarm.
+     * The result is the same either way: a charge is dated to the moment it was
+     * *due*, not to the moment the app noticed, so a bill on the 2nd lands on
+     * the 2nd in Riwayat even if the phone was not opened until the 5th. An
+     * alarm would only have made the row appear earlier, at the cost of a
+     * scheduler, a permission and a battery argument.
+     *
+     * A plan whose bank has been closed is skipped rather than charged: notes in
+     * a closed bank count towards no balance, so writing one would quietly drop
+     * the money out of every figure in the app. Its watermark stays put, so the
+     * bills it missed are written as soon as another bank is picked.
+     */
+    suspend fun runDueSubscriptions(
+        now: Instant = Instant.now(),
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): Int = subscriptionRuns.withLock { writeDueSubscriptions(now, zone) }
+
+    /**
+     * The run itself, only ever entered one at a time.
+     *
+     * The lock is not decoration. A cold start calls the catch-up from
+     * `Application.onCreate` and again from the activity's `onStart` a moment
+     * later, and saving a plan calls it a third time — on a multi-threaded
+     * dispatcher two of those can read the same watermark before either has
+     * moved it, and write the same bill twice. Serialising the runs is what makes
+     * "a charge is written exactly once" true rather than merely likely.
+     */
+    private suspend fun writeDueSubscriptions(now: Instant, zone: ZoneId): Int {
+        val candidates = subscriptionDao.getDueCandidates()
+        if (candidates.isEmpty()) return 0
+
+        val openBanks = bankDao.getAll().filter { it.archivedAt == null }.map { it.id }.toSet()
+        var written = 0
+
+        candidates.forEach { row ->
+            val subscription = row.toDomain()
+            if (subscription.pocket == Pocket.ONLINE && subscription.bankId !in openBanks) {
+                return@forEach
+            }
+
+            val due = subscription.dueBetween(subscription.chargedThrough, now, zone)
+            if (due.isEmpty()) return@forEach
+
+            val charges = due.map { moment ->
+                TransactionEntity(
+                    id = UUID.randomUUID().toString(),
+                    type = TransactionType.EXPENSE.id,
+                    pocket = subscription.pocket.id,
+                    category = subscription.categoryId,
+                    bank = subscription.bankId.takeIf { subscription.pocket == Pocket.ONLINE },
+                    amount = subscription.amount,
+                    description = subscription.name,
+                    subscription = subscription.id,
+                    occurredAt = moment.toEpochMilli(),
+                    createdAt = now.toEpochMilli(),
+                )
+            }
+            // The notes and the watermark in one transaction, and the watermark
+            // moves only as far as what was actually written: the catch-up limit
+            // can leave bills behind, and they are still owed on the next run.
+            subscriptionDao.writeCharges(
+                id = subscription.id,
+                chargedThrough = due.last().toEpochMilli(),
+                charges = charges,
+            )
+            written += charges.size
+        }
+
+        return written
+    }
+
     // ------------------------------------------------------------ attachments
 
     /**
@@ -720,6 +974,9 @@ class TransactionRepository(
             attachments = attachmentDao.getAllOnce()
                 .filter { it.transactionId in live }
                 .map { AttachmentExportRecord.from(it, zone) },
+            subscriptions = subscriptionDao.getAllOnce().map {
+                SubscriptionExportRecord.from(it, zone, bankNames)
+            },
             zone = zone,
         )
     }
@@ -816,6 +1073,12 @@ class TransactionRepository(
             restored.forEach { attachments.ensureThumbnail(it.toDomain()) }
         }
 
+        // Merged by id like the rest, watermark and all. Restoring a plan
+        // without its watermark would make the next launch write every bill it
+        // has ever had, on top of the very notes this file just put back.
+        val subscriptions = document.subscriptions.mapNotNull { it.toEntity() }
+        if (subscriptions.isNotEmpty()) subscriptionDao.upsertAll(subscriptions)
+
         val foldedInto = normaliseBanks()
 
         return ImportResult(
@@ -827,6 +1090,7 @@ class TransactionRepository(
             checksImported = checks.size,
             transfersImported = transfers.size,
             attachmentsImported = restored.size,
+            subscriptionsImported = subscriptions.size,
             foldedIntoBank = foldedInto.takeIf { document.preBanks },
         )
     }

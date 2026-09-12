@@ -44,6 +44,15 @@ data class TransactionExportRecord(
     @SerialName("amount") val amount: Long,
     @SerialName("signed_amount") val signedAmount: Long,
     @SerialName("description") val description: String,
+    /**
+     * The plan that wrote this note, when the app wrote it itself.
+     *
+     * Empty for every note a person typed, and empty in every file written
+     * before format version 6. Carrying it keeps an automatic charge recognisable
+     * as one after a restore — and keeps a plan's "sudah tercatat" count honest,
+     * since that count is read off the notes rather than stored.
+     */
+    @SerialName("subscription") val subscription: String = "",
 ) {
     companion object {
         /** Column order for a tabular (CSV / spreadsheet) export. */
@@ -51,6 +60,7 @@ data class TransactionExportRecord(
             "id", "date", "time", "timestamp_iso", "created_iso", "updated_iso",
             "type", "type_label", "pocket", "pocket_label", "bank", "bank_label",
             "category", "category_label", "amount", "signed_amount", "description",
+            "subscription",
         )
 
         private val DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd")
@@ -90,6 +100,7 @@ data class TransactionExportRecord(
                 amount = entity.amount,
                 signedAmount = if (type == TransactionType.INCOME) entity.amount else -entity.amount,
                 description = entity.description,
+                subscription = entity.subscription.orEmpty(),
             )
         }
 
@@ -103,6 +114,7 @@ data class TransactionExportRecord(
         id, date, time, timestampIso, createdIso, updatedIso,
         type, typeLabel, pocket, pocketLabel, bank, bankLabel,
         category, categoryLabel, amount.toString(), signedAmount.toString(), description,
+        subscription,
     )
 
     /**
@@ -127,6 +139,7 @@ data class TransactionExportRecord(
             bank = bank.takeIf { it.isNotBlank() && resolvedPocket == Pocket.ONLINE },
             amount = amount,
             description = description,
+            subscription = subscription.takeIf { it.isNotBlank() },
             occurredAt = occurred.toEpochMilli(),
             createdAt = created.toEpochMilli(),
             updatedAt = parseInstant(updatedIso)?.toEpochMilli(),

@@ -34,6 +34,10 @@ import com.esa.moneytracker.ui.records.RecordsViewModel
 import com.esa.moneytracker.ui.setup.SetupGate
 import com.esa.moneytracker.ui.setup.SetupScreen
 import com.esa.moneytracker.ui.setup.SetupViewModel
+import com.esa.moneytracker.ui.subscriptions.SubscriptionFormScreen
+import com.esa.moneytracker.ui.subscriptions.SubscriptionFormViewModel
+import com.esa.moneytracker.ui.subscriptions.SubscriptionsScreen
+import com.esa.moneytracker.ui.subscriptions.SubscriptionsViewModel
 import com.esa.moneytracker.ui.transfer.TransferScreen
 import com.esa.moneytracker.ui.transfer.TransferViewModel
 import com.esa.moneytracker.ui.transfer.TransfersScreen
@@ -65,6 +69,17 @@ object Routes {
 
     /** The Pindah Dana form, for a move that does not exist yet. */
     const val TRANSFER_NEW = "transfer-new"
+
+    /** Langganan — the recurring bills and what they add up to. */
+    const val SUBSCRIPTIONS = "subscriptions"
+
+    /** The plan form, for a bill that does not exist yet. */
+    const val SUBSCRIPTION_NEW = "subscription-new"
+
+    const val SUBSCRIPTION_ARG = "subscriptionId"
+    const val SUBSCRIPTION_EDIT = "subscription-edit/{$SUBSCRIPTION_ARG}"
+
+    fun subscriptionEdit(subscriptionId: String): String = "subscription-edit/$subscriptionId"
 
     const val TRANSFER_ARG = "transferId"
     const val TRANSFER_EDIT = "transfer-edit/{$TRANSFER_ARG}"
@@ -152,6 +167,7 @@ private fun MainNavHost(
                 onOpenRecords = { navController.navigate(Routes.RECORDS) },
                 onOpenBanks = { navController.navigate(Routes.BANKS) },
                 onOpenData = { navController.navigate(Routes.BACKUP) },
+                onOpenSubscriptions = { navController.navigate(Routes.SUBSCRIPTIONS) },
             )
         }
 
@@ -279,6 +295,37 @@ private fun MainNavHost(
             )
         }
 
+        composable(Routes.SUBSCRIPTIONS) {
+            val viewModel: SubscriptionsViewModel =
+                viewModel(factory = SubscriptionsViewModel.Factory)
+            val state by viewModel.state.collectAsStateWithLifecycle()
+
+            SubscriptionsScreen(
+                state = state,
+                onBack = { navController.popBackStack() },
+                onAdd = { navController.navigate(Routes.SUBSCRIPTION_NEW) },
+                onEdit = { navController.navigate(Routes.subscriptionEdit(it)) },
+                onPause = viewModel::pause,
+                onResume = viewModel::resume,
+                onDelete = viewModel::delete,
+                onRestore = viewModel::restore,
+            )
+        }
+
+        composable(Routes.SUBSCRIPTION_NEW) {
+            SubscriptionRoute(navController = navController, subscriptionId = null)
+        }
+
+        composable(
+            route = Routes.SUBSCRIPTION_EDIT,
+            arguments = listOf(navArgument(Routes.SUBSCRIPTION_ARG) { type = NavType.StringType }),
+        ) { entry ->
+            SubscriptionRoute(
+                navController = navController,
+                subscriptionId = entry.arguments?.getString(Routes.SUBSCRIPTION_ARG).orEmpty(),
+            )
+        }
+
         composable(Routes.TRANSFER_NEW) {
             TransferRoute(navController = navController, transferId = null)
         }
@@ -364,6 +411,44 @@ private fun MainNavHost(
             )
         }
     }
+}
+
+/**
+ * The Langganan form, whether it is describing a new bill or fixing an old one.
+ *
+ * Both routes land here for the same reason the transfer ones do: a plan asks
+ * the same questions either way, and only the starting answers differ.
+ */
+@Composable
+private fun SubscriptionRoute(
+    navController: NavHostController,
+    subscriptionId: String?,
+) {
+    val viewModel: SubscriptionFormViewModel = viewModel(
+        key = "subscription-" + (subscriptionId ?: "new"),
+        factory = SubscriptionFormViewModel.factory(subscriptionId),
+    )
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    LaunchedEffect(state.saved) {
+        if (state.saved) navController.popBackStack()
+    }
+
+    SubscriptionFormScreen(
+        state = state,
+        onNameChanged = viewModel::onNameChanged,
+        onAmountChanged = viewModel::onAmountChanged,
+        onChooseCategory = viewModel::chooseCategory,
+        onChoosePocket = viewModel::choosePocket,
+        onChooseBank = viewModel::chooseBank,
+        onAddBank = viewModel::addBank,
+        onChooseCycle = viewModel::chooseCycle,
+        onChooseDayOfMonth = viewModel::chooseDayOfMonth,
+        onChooseDayOfWeek = viewModel::chooseDayOfWeek,
+        onTimeChanged = viewModel::onTimeChanged,
+        onBack = { navController.popBackStack() },
+        onSubmit = viewModel::submit,
+    )
 }
 
 /**

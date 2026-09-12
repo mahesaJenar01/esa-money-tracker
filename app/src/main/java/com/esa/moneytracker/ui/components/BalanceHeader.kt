@@ -12,10 +12,12 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material3.Icon
@@ -50,6 +52,7 @@ fun BalanceHeader(
     bankCount: Int = 0,
     onOpenBanks: (() -> Unit)? = null,
     onOpenData: (() -> Unit)? = null,
+    onOpenSubscriptions: (() -> Unit)? = null,
 ) {
     Box(
         modifier = modifier
@@ -86,22 +89,20 @@ fun BalanceHeader(
                     color = Color.White.copy(alpha = 0.72f),
                     modifier = Modifier.weight(1f),
                 )
+                if (onOpenSubscriptions != null) {
+                    HeaderButton(
+                        icon = Icons.Rounded.Autorenew,
+                        description = "Langganan",
+                        onClick = onOpenSubscriptions,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
                 if (onOpenData != null) {
-                    Box(
-                        Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .clickable(onClick = onOpenData),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.MoreHoriz,
-                            contentDescription = "Data dan cadangan",
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
+                    HeaderButton(
+                        icon = Icons.Rounded.MoreHoriz,
+                        description = "Data dan cadangan",
+                        onClick = onOpenData,
+                    )
                 }
             }
             Spacer(Modifier.height(6.dp))
@@ -134,6 +135,30 @@ fun BalanceHeader(
                 )
             }
         }
+    }
+}
+
+/** One of the small round buttons sitting on the gradient. */
+@Composable
+private fun HeaderButton(
+    icon: ImageVector,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.15f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = description,
+            tint = Color.White,
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 

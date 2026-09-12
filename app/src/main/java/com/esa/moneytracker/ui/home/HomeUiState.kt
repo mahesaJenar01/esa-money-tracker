@@ -3,6 +3,8 @@ package com.esa.moneytracker.ui.home
 import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.Category
+import com.esa.moneytracker.data.model.SubscriptionTotals
+import com.esa.moneytracker.data.model.SubscriptionUsage
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.util.AnalyticsPeriod
 import java.time.Instant
@@ -74,6 +76,15 @@ data class HomeUiState(
     val breakdown: List<CategorySlice> = emptyList(),
 
     val latest: Transaction? = null,
+
+    /**
+     * What the recurring bills add up to, and which one lands next.
+     *
+     * On the home screen because it answers a question the balance cannot: how
+     * much of what is showing above is already spoken for.
+     */
+    val subscriptions: SubscriptionTotals = SubscriptionTotals(),
+    val nextBill: SubscriptionUsage? = null,
 
     /** This week only — older weeks live on the detailed Riwayat page. */
     val days: List<DayGroup> = emptyList(),

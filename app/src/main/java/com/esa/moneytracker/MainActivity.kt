@@ -31,4 +31,17 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    /**
+     * Coming back to the app is the moment to check the recurring bills.
+     *
+     * The process survives being backgrounded for days, so `Application.onCreate`
+     * alone would leave a bill unwritten until the app was killed and started
+     * again. Nothing here can double-charge: a plan's watermark is what decides
+     * whether a due moment has already been written.
+     */
+    override fun onStart() {
+        super.onStart()
+        (application as MoneyTrackerApp).catchUpSubscriptions()
+    }
 }

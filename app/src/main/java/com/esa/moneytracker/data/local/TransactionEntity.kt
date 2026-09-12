@@ -26,6 +26,7 @@ import java.time.Instant
         Index("pocket"),
         Index("bank"),
         Index("deleted_at"),
+        Index("subscription"),
     ],
 )
 data class TransactionEntity(
@@ -61,6 +62,19 @@ data class TransactionEntity(
 
     @ColumnInfo(name = "description")
     val description: String,
+
+    /**
+     * [SubscriptionEntity.id] when the app wrote this note by itself, null when
+     * a person did.
+     *
+     * It is only ever a label on the note: the balances, the analytics and the
+     * history treat an automatic charge exactly like a typed one, because it is
+     * exactly like a typed one — money that left on a day. What the column buys
+     * is the ability to say where it came from, and to count what a plan has
+     * actually cost so far.
+     */
+    @ColumnInfo(name = "subscription")
+    val subscription: String? = null,
 
     /**
      * Epoch millis, UTC — when the money actually moved.
@@ -104,6 +118,7 @@ fun TransactionEntity.toDomain(): Transaction = Transaction(
     bankId = bank,
     amount = amount,
     description = description,
+    subscriptionId = subscription,
     occurredAt = Instant.ofEpochMilli(occurredAt),
     createdAt = Instant.ofEpochMilli(createdAt),
     updatedAt = updatedAt?.let(Instant::ofEpochMilli),
@@ -119,6 +134,7 @@ fun Transaction.toEntity(): TransactionEntity =
         bank = bankId,
         amount = amount,
         description = description,
+        subscription = subscriptionId,
         occurredAt = occurredAt.toEpochMilli(),
         createdAt = createdAt.toEpochMilli(),
         updatedAt = updatedAt?.toEpochMilli(),

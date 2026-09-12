@@ -1,7 +1,9 @@
 package com.esa.moneytracker.util
 
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.temporal.ChronoUnit
 
 /**
@@ -23,11 +25,21 @@ object IndonesianDates {
     /** Index 0 == Monday, matching [java.time.DayOfWeek.getValue] minus one. */
     private val daysShort = arrayOf("Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min")
 
+    private val daysLong = arrayOf(
+        "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu",
+    )
+
     fun monthShort(date: LocalDate): String = monthsShort[date.monthValue - 1]
 
     fun monthLong(date: LocalDate): String = monthsLong[date.monthValue - 1]
 
     fun dayShort(date: LocalDate): String = daysShort[date.dayOfWeek.value - 1]
+
+    /** `"Sen"` — the weekday on its own, for a schedule rather than a date. */
+    fun dayShort(day: DayOfWeek): String = daysShort[day.value - 1]
+
+    /** `"Senin"` */
+    fun dayName(day: DayOfWeek): String = daysLong[day.value - 1]
 
     /** `"1 Sep 2026"` */
     fun shortDate(date: LocalDate): String =
@@ -66,6 +78,26 @@ object IndonesianDates {
     /** `"14:35"` */
     fun time(dateTime: LocalDateTime): String =
         "%02d:%02d".format(dateTime.hour, dateTime.minute)
+
+    /** `"14:35"`, for a clock with no date attached. */
+    fun time(time: LocalTime): String = "%02d:%02d".format(time.hour, time.minute)
+
+    /**
+     * How long until something, in the words a person would use.
+     *
+     * The mirror of [sinceLabel]: `"Hari ini"` / `"Besok"` / `"5 hari lagi"`.
+     */
+    fun untilLabel(date: LocalDate, today: LocalDate): String {
+        val days = ChronoUnit.DAYS.between(today, date)
+        return when {
+            days < 0L -> sinceLabel(date, today)
+            days == 0L -> "Hari ini"
+            days == 1L -> "Besok"
+            days < 14L -> "$days hari lagi"
+            days < 60L -> "${days / 7} minggu lagi"
+            else -> "${days / 30} bulan lagi"
+        }
+    }
 
     /** `"1 – 7 Sep 2026"`, collapsing the repeated month or year where possible. */
     fun dateRange(start: LocalDate, endInclusive: LocalDate): String = when {

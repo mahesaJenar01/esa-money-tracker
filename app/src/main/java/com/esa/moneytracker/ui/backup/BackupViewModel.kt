@@ -255,6 +255,9 @@ suspend fun runImport(
         if (result.attachmentsImported > 0) {
             add(result.attachmentsImported.toString() + " lampiran dipulihkan")
         }
+        if (result.subscriptionsImported > 0) {
+            add(result.subscriptionsImported.toString() + " langganan dipulihkan")
+        }
         if (result.openingBalanceApplied) add("saldo awal dipulihkan")
         if (result.skipped > 0) add(result.skipped.toString() + " baris dilewati")
         // A file from before banks existed is not refused, it is converted — and

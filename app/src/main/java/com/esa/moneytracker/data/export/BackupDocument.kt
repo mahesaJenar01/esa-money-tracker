@@ -20,7 +20,8 @@ import java.time.format.DateTimeFormatter
  * `opening_balance.online` is written as zero. A version 1 file has it the other
  * way round and no banks at all; the importer folds that figure into a single
  * bank so the restored total is the same number it was. Version 3 adds the
- * balance checks — the marks left in the history by a reconciliation.
+ * balance checks — the marks left in the history by a reconciliation. Version 6
+ * adds the recurring bills.
  *
  * [formatVersion] is the promise made to older files: readers must accept any
  * version they understand and ignore fields they do not, which is why the JSON
@@ -70,6 +71,16 @@ data class BackupDocument(
      * reads this list when it came out of an archive.
      */
     @SerialName("attachments") val attachments: List<AttachmentExportRecord> = emptyList(),
+    /**
+     * The recurring bills — the plans behind Langganan.
+     *
+     * Absent before format version 6. Each carries its own watermark, so a plan
+     * comes back knowing which of its bills have already been written and the
+     * next launch does not charge them all over again on top of the notes this
+     * same file just restored.
+     */
+    @SerialName("subscriptions") val subscriptions: List<SubscriptionExportRecord> =
+        emptyList(),
 ) {
     /** True for a file written before banks existed. */
     val preBanks: Boolean get() = formatVersion < 2 || banks.isEmpty()
@@ -81,7 +92,7 @@ data class BackupDocument(
 
     companion object {
         const val APP_ID = "esa-money-tracker"
-        const val FORMAT_VERSION = 5
+        const val FORMAT_VERSION = 6
 
         private val json = Json {
             prettyPrint = true
@@ -96,6 +107,7 @@ data class BackupDocument(
             balanceChecks: List<BalanceCheckExportRecord>,
             transfers: List<TransferExportRecord>,
             attachments: List<AttachmentExportRecord>,
+            subscriptions: List<SubscriptionExportRecord>,
             zone: ZoneId,
             now: Instant = Instant.now(),
         ): BackupDocument = BackupDocument(
@@ -106,6 +118,7 @@ data class BackupDocument(
             balanceChecks = balanceChecks,
             transfers = transfers,
             attachments = attachments,
+            subscriptions = subscriptions,
         )
 
         /** Null when the text is not JSON at all; check [recognised] after that. */

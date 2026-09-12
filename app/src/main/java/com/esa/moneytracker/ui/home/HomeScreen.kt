@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -45,6 +46,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.esa.moneytracker.data.model.SubscriptionTotals
+import com.esa.moneytracker.data.model.SubscriptionUsage
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.ui.components.BalanceCheckMark
 import com.esa.moneytracker.ui.components.BalanceHeader
@@ -59,6 +62,7 @@ import com.esa.moneytracker.util.AnalyticsPeriod
 import com.esa.moneytracker.util.CurrencyFormatter
 import com.esa.moneytracker.util.IndonesianDates
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 import java.time.ZoneId
 
 @Composable
@@ -75,6 +79,7 @@ fun HomeScreen(
     onOpenRecords: () -> Unit,
     onOpenBanks: () -> Unit,
     onOpenData: () -> Unit,
+    onOpenSubscriptions: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val zone = remember { ZoneId.systemDefault() }
@@ -116,7 +121,21 @@ fun HomeScreen(
                     bankCount = state.bankCount,
                     onOpenBanks = onOpenBanks,
                     onOpenData = onOpenData,
+                    onOpenSubscriptions = onOpenSubscriptions,
                 )
+            }
+
+            item("subscriptions") {
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    Spacer(Modifier.height(20.dp))
+                    SubscriptionsCard(
+                        totals = state.subscriptions,
+                        next = state.nextBill,
+                        today = state.today,
+                        zone = zone,
+                        onClick = onOpenSubscriptions,
+                    )
+                }
             }
 
             item("analytics") {
@@ -232,6 +251,87 @@ fun HomeScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * What the recurring bills cost, on the screen that shows what there is.
+ *
+ * A balance says how much money exists; it cannot say how much of it is already
+ * promised to somebody else. That is the one number this card is here for, and
+ * the bill landing next is the detail that makes it concrete.
+ */
+@Composable
+private fun SubscriptionsCard(
+    totals: SubscriptionTotals,
+    next: SubscriptionUsage?,
+    today: LocalDate,
+    zone: ZoneId,
+    onClick: () -> Unit,
+) {
+    val colors = MoneyTheme.colors
+
+    SoftCard(modifier = Modifier.clickable(onClick = onClick)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(
+                icon = Icons.Rounded.Autorenew,
+                tint = if (totals.isEmpty) colors.muted else colors.expense,
+                size = 46.dp,
+            )
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = if (totals.isEmpty) "Langganan" else "Pengeluaran pasti tiap bulan",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = if (totals.isEmpty) {
+                        "Catat tagihan rutinmu sekali"
+                    } else {
+                        CurrencyFormatter.rupiah(totals.perMonth)
+                    },
+                    style = if (totals.isEmpty) {
+                        MaterialTheme.typography.titleMedium
+                    } else {
+                        MaterialTheme.typography.headlineSmall
+                    },
+                    color = if (totals.isEmpty) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        colors.expense
+                    },
+                )
+            }
+            Icon(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = "Buka langganan",
+                tint = colors.muted,
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Hairline()
+        Spacer(Modifier.height(12.dp))
+
+        Text(
+            text = when {
+                totals.isEmpty ->
+                    "Tagihan yang datang tiap bulan atau tiap minggu tercatat sendiri " +
+                        "begitu tanggalnya tiba."
+
+                next?.nextDue != null -> {
+                    val date = next.nextDue.atZone(zone).toLocalDate()
+                    "Berikutnya " + next.subscription.name + " • " +
+                        IndonesianDates.dayAndDate(date) + " • " +
+                        IndonesianDates.untilLabel(date, today)
+                }
+
+                else -> "Semua langganan sedang dijeda."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
