@@ -168,7 +168,7 @@ class HomeViewModel(
             // The one that lands first, so the card can name it rather than
             // leaving the user to open the page and work it out.
             nextBill = subscriptions
-                .filter { it.nextDue != null && !it.subscription.paused }
+                .filter { it.nextDue != null && it.subscription.active }
                 .minByOrNull { it.nextDue!! },
             days = historyDays(thisWeek, checksThisWeek, zone, today),
             weekRangeLabel = week.rangeLabel,

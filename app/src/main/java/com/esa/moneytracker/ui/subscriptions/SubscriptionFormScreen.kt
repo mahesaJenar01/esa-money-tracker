@@ -19,13 +19,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.EventRepeat
+import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,6 +41,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.esa.moneytracker.data.model.BankColor
@@ -87,6 +95,9 @@ fun SubscriptionFormScreen(
     onChooseDayOfMonth: (Int) -> Unit,
     onChooseDayOfWeek: (DayOfWeek) -> Unit,
     onTimeChanged: (LocalTime) -> Unit,
+    onChooseLimited: (Boolean) -> Unit,
+    onCountChanged: (String) -> Unit,
+    onStepCount: (Int) -> Unit,
     onBack: () -> Unit,
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier,
@@ -188,6 +199,18 @@ fun SubscriptionFormScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     FieldLabel("Jam berapa dicatat?")
                     TimeOfDayField(value = state.timeOfDay, onChange = onTimeChanged)
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    FieldLabel("Sampai kapan?")
+                    EndPicker(limited = state.limited, onSelect = onChooseLimited)
+                    if (state.limited) {
+                        CountField(
+                            state = state,
+                            onCountChanged = onCountChanged,
+                            onStepCount = onStepCount,
+                        )
+                    }
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -301,6 +324,167 @@ private fun CyclePicker(selected: BillingCycle, onSelect: (BillingCycle) -> Unit
                 )
             }
         }
+    }
+}
+
+/**
+ * Whether the plan ends by itself.
+ *
+ * Asked as two cards rather than a switch because both answers are ordinary: a
+ * YouTube subscription runs until it is cancelled, a cicilan mobil has a last
+ * payment the day it is signed.
+ */
+@Composable
+private fun EndPicker(limited: Boolean, onSelect: (Boolean) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        listOf(
+            Triple(false, "Terus menerus", "Sampai kuhentikan sendiri"),
+            Triple(true, "Sekian kali", "Cicilan, tagihan berjangka"),
+        ).forEach { (value, title, subtitle) ->
+            val isSelected = value == limited
+            val tint = MaterialTheme.colorScheme.primary
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        if (isSelected) tint.copy(alpha = 0.14f) else MoneyTheme.colors.surfaceElevated,
+                    )
+                    .border(
+                        width = if (isSelected) 2.dp else 1.dp,
+                        color = if (isSelected) tint else MoneyTheme.colors.hairline,
+                        shape = RoundedCornerShape(18.dp),
+                    )
+                    .clickable { onSelect(value) }
+                    .padding(14.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * How many bills in all, with the arithmetic done out loud underneath.
+ *
+ * The count includes bills already written, because "cicilan 12 kali" is how
+ * the contract says it — so an edit shows how many are behind and how many are
+ * left, rather than asking the user to subtract.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CountField(
+    state: SubscriptionFormUiState,
+    onCountChanged: (String) -> Unit,
+    onStepCount: (Int) -> Unit,
+) {
+    val colors = MoneyTheme.colors
+    val error = state.countError
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        StepButton(icon = Icons.Rounded.Remove, label = "Kurangi", onClick = { onStepCount(-1) })
+        Spacer(Modifier.width(10.dp))
+        OutlinedTextField(
+            value = state.countDigits,
+            onValueChange = onCountChanged,
+            modifier = Modifier.weight(1f),
+            placeholder = { Text("0") },
+            suffix = { Text("kali") },
+            textStyle = MaterialTheme.typography.titleMedium.copy(
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            ),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Done,
+            ),
+            singleLine = true,
+            isError = error != null,
+            shape = RoundedCornerShape(18.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = colors.hairline,
+                focusedContainerColor = colors.surfaceElevated,
+                unfocusedContainerColor = colors.surfaceElevated,
+            ),
+        )
+        Spacer(Modifier.width(10.dp))
+        StepButton(icon = Icons.Rounded.Add, label = "Tambah", onClick = { onStepCount(1) })
+    }
+
+    val shortcuts = when (state.cycle) {
+        BillingCycle.MONTHLY -> listOf(3, 6, 12, 24)
+        BillingCycle.WEEKLY -> listOf(4, 12, 26, 52)
+    }
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        shortcuts.forEach { count ->
+            val isSelected = state.countDigits == count.toString()
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        if (isSelected) MaterialTheme.colorScheme.primary else colors.surfaceElevated,
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else colors.hairline,
+                        shape = RoundedCornerShape(14.dp),
+                    )
+                    .clickable { onCountChanged(count.toString()) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    text = count.toString() + " " + state.cycle.unit,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isSelected) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+            }
+        }
+    }
+
+    when {
+        error != null -> Hint(error, error = true)
+
+        state.chargesMade > 0 -> {
+            val left = (state.totalCharges ?: 0) - state.chargesMade
+            Hint(
+                "Sudah tercatat " + state.chargesMade + " kali, jadi " +
+                    if (left > 0) "tinggal " + left + " kali lagi." else "langganan ini selesai.",
+            )
+        }
+
+        else -> Hint("Dihitung mulai dari tagihan berikutnya. Setelah itu berhenti sendiri.")
+    }
+}
+
+@Composable
+private fun StepButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(52.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = label, tint = MaterialTheme.colorScheme.primary)
     }
 }
 
@@ -477,9 +661,24 @@ private fun PreviewCard(state: SubscriptionFormUiState, zone: ZoneId) {
                 )
                 if (preview == null) {
                     Text(
-                        text = "Isi nama dan nominalnya dulu",
+                        text = if (state.countError != null) {
+                            "Periksa jumlah tagihannya dulu"
+                        } else {
+                            "Isi nama dan nominalnya dulu"
+                        },
                         style = MaterialTheme.typography.titleSmall,
                         color = colors.muted,
+                    )
+                } else if (preview.finished) {
+                    Text(
+                        text = "Tidak ada lagi",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "Semua tagihannya sudah tercatat — langganan selesai",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
                     // The same moment the catch-up run would pick, so the card
@@ -512,9 +711,23 @@ private fun PreviewCard(state: SubscriptionFormUiState, zone: ZoneId) {
             Spacer(Modifier.height(12.dp))
             Hairline()
             Spacer(Modifier.height(12.dp))
+            val remaining = preview.remainingCharges
+            val last = preview.lastDue(zone)?.atZone(zone)?.toLocalDate()
             Text(
-                text = preview.scheduleLabel + ", terus berulang. Setara " +
-                    CurrencyFormatter.rupiah(preview.monthlyEquivalent) + " per bulan.",
+                text = when {
+                    remaining == null ->
+                        preview.scheduleLabel + ", terus berulang sampai kamu hentikan. Setara " +
+                            CurrencyFormatter.rupiah(preview.monthlyEquivalent) + " per bulan."
+
+                    remaining == 0 || last == null ->
+                        preview.scheduleLabel + ", sudah " + preview.chargesMade +
+                            " kali tercatat dari " + preview.totalCharges + "."
+
+                    else ->
+                        preview.scheduleLabel + ", " + remaining + " kali lagi. Tagihan " +
+                            "terakhir " + IndonesianDates.dayAndDate(last) + ", lalu berhenti sendiri. Sisa totalnya " +
+                            CurrencyFormatter.rupiah(remaining * preview.amount) + "."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

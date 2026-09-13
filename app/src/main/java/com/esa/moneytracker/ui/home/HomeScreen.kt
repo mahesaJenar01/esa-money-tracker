@@ -327,6 +327,9 @@ private fun SubscriptionsCard(
                         IndonesianDates.untilLabel(date, today)
                 }
 
+                totals.activeCount == 0 && totals.pausedCount == 0 ->
+                    "Semua langganan sudah selesai."
+
                 else -> "Semua langganan sedang dijeda."
             },
             style = MaterialTheme.typography.bodySmall,

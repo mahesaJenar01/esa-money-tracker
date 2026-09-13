@@ -62,6 +62,21 @@ data class Subscription(
     val chargedThrough: Instant,
     /** Non-null while the plan is paused: no charge is written and none is owed. */
     val pausedAt: Instant? = null,
+    /**
+     * How many bills the plan writes in all before it stops by itself, or null
+     * to keep going until it is paused or deleted.
+     *
+     * A cicilan mobil with five payments left is `5`; YouTube is `null`.
+     */
+    val totalCharges: Int? = null,
+    /**
+     * How many bills the plan has written so far — the counter [totalCharges]
+     * is measured against.
+     *
+     * Kept on the plan rather than counted from the notes: deleting a charge
+     * that was entered wrong must not hand the plan an extra bill to write.
+     */
+    val chargesMade: Int = 0,
     val createdAt: Instant,
     val updatedAt: Instant? = null,
     /** Non-null once the plan is deleted; the notes it wrote are left alone. */
@@ -72,6 +87,19 @@ data class Subscription(
     val categoryLabel: String get() = category?.label ?: categoryId
 
     val paused: Boolean get() = pausedAt != null
+
+    /** True for a plan that runs until it is told to stop. */
+    val endless: Boolean get() = totalCharges == null
+
+    /** Bills still to be written, or null for a plan without an end. */
+    val remainingCharges: Int?
+        get() = totalCharges?.let { (it - chargesMade).coerceAtLeast(0) }
+
+    /** Every bill it was set up for has been written; nothing more will be. */
+    val finished: Boolean get() = remainingCharges == 0
+
+    /** Running: neither paused nor finished, so it will write another bill. */
+    val active: Boolean get() = !paused && !finished
 
     val edited: Boolean get() = updatedAt != null
 
@@ -152,12 +180,29 @@ data class Subscription(
         dueMomentsAfter(after, zone).first()
 
     /**
+     * When the final bill lands, counting on from the watermark, or null for a
+     * plan without an end or one that has already finished.
+     *
+     * A forecast that assumes the plan is not paused in between: pausing skips
+     * bills rather than writing them, so it pushes this date later.
+     */
+    fun lastDue(zone: ZoneId): Instant? {
+        val remaining = remainingCharges ?: return null
+        if (remaining == 0) return null
+        return dueMomentsAfter(chargedThrough, zone).drop(remaining - 1).first()
+    }
+
+    /**
      * The bills that came due while nobody was looking.
      *
      * [limit] is a brake, not a rule: a plan left alone for years would
      * otherwise write hundreds of notes in one go. Whatever it leaves behind is
      * still owed and is written on the next run, because the watermark only ever
      * moves to the last charge actually made.
+     *
+     * A plan with an end never gets more than the bills it has left, however
+     * long the phone was not opened: the sixth payment of a five-payment cicilan
+     * is not a debt.
      */
     fun dueBetween(
         after: Instant,
@@ -167,7 +212,7 @@ data class Subscription(
     ): List<Instant> =
         dueMomentsAfter(after, zone)
             .takeWhile { !it.isAfter(until) }
-            .take(limit)
+            .take(minOf(limit, remainingCharges ?: limit))
             .toList()
 
     private fun YearMonth.dueDate(): LocalDate = atDay(minOf(dayOfMonth, lengthOfMonth()))
@@ -178,6 +223,9 @@ data class Subscription(
 
         /** The most charges one catch-up run will write for a single plan. */
         const val MAX_CATCH_UP = 36
+
+        /** The longest a plan with an end can be set to run — 50 years of months. */
+        const val MAX_TOTAL_CHARGES = 600
 
         private const val WEEKS_PER_YEAR = 52.0
         private const val MONTHS_PER_YEAR = 12.0
@@ -191,7 +239,7 @@ data class Subscription(
 data class SubscriptionUsage(
     val subscription: Subscription,
     val chargeCount: Int,
-    /** When the next bill lands, or null while the plan is paused. */
+    /** When the next bill lands, or null while the plan is paused or finished. */
     val nextDue: Instant?,
     /**
      * True when the bank this is paid from has been closed.
@@ -222,8 +270,15 @@ data class SubscriptionTotals(
     val remainingThisMonth: Long = 0,
     val activeCount: Int = 0,
     val pausedCount: Int = 0,
+    /** Plans with an end that have written their last bill. */
+    val finishedCount: Int = 0,
+    /**
+     * What the running plans with an end still have to bill, all of it — the
+     * rest of every cicilan, added up. Plans without an end have no such figure.
+     */
+    val remainingCommitted: Long = 0,
 ) {
-    val isEmpty: Boolean get() = activeCount == 0 && pausedCount == 0
+    val isEmpty: Boolean get() = activeCount == 0 && pausedCount == 0 && finishedCount == 0
 }
 
 /**
@@ -231,7 +286,13 @@ data class SubscriptionTotals(
  *
  * Paused plans are left out of every figure: a plan that is not charging is not
  * money leaving, and counting it would make the total a wish rather than a
- * forecast.
+ * forecast. Finished plans are left out for the same reason — the last payment
+ * of a cicilan is the end of that money leaving.
+ *
+ * The calendar figure for this month is the one place a finished plan can still
+ * appear: a bill it wrote earlier this month did leave this month. A plan with
+ * an end only counts the bills it still has left, so a cicilan whose last
+ * payment is on the 5th adds nothing for the 5th of next month.
  */
 fun subscriptionTotalsOf(
     subscriptions: List<Subscription>,
@@ -239,16 +300,23 @@ fun subscriptionTotalsOf(
     now: Instant,
     zone: ZoneId,
 ): SubscriptionTotals {
-    val active = subscriptions.filterNot { it.paused }
+    val active = subscriptions.filter { it.active }
     val monthStart = today.withDayOfMonth(1)
     val monthEnd = monthStart.plusMonths(1)
 
     var thisMonth = 0L
     var remaining = 0L
-    active.forEach { subscription ->
+    subscriptions.filterNot { it.paused }.forEach { subscription ->
+        var owedLeft = subscription.remainingCharges
         subscription.dueDatesIn(monthStart, monthEnd).forEach { date ->
-            thisMonth += subscription.amount
             val moment = date.atTime(subscription.timeOfDay).atZone(zone).toInstant()
+            // A bill past the watermark is only real while the plan still has
+            // bills left to write.
+            if (moment.isAfter(subscription.chargedThrough) && owedLeft != null) {
+                if (owedLeft == 0) return@forEach
+                owedLeft -= 1
+            }
+            thisMonth += subscription.amount
             if (moment.isAfter(now)) remaining += subscription.amount
         }
     }
@@ -260,6 +328,8 @@ fun subscriptionTotalsOf(
         thisMonth = thisMonth,
         remainingThisMonth = remaining,
         activeCount = active.size,
-        pausedCount = subscriptions.size - active.size,
+        pausedCount = subscriptions.count { it.paused && !it.finished },
+        finishedCount = subscriptions.count { it.finished },
+        remainingCommitted = active.sumOf { (it.remainingCharges ?: 0) * it.amount },
     )
 }

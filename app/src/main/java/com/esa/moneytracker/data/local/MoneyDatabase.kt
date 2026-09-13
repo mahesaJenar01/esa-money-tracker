@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AttachmentEntity::class,
         SubscriptionEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class MoneyDatabase : RoomDatabase() {
@@ -336,6 +336,30 @@ abstract class MoneyDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v8 lets a plan end by itself: a cicilan with five payments left writes
+         * five bills and stops.
+         *
+         * `total_charges` is null for every existing plan, which keeps each of
+         * them running exactly as before. `charges_made` is backfilled from the
+         * notes each plan has already written — bin included, since a charge
+         * that was deleted was still a charge — so a plan that is later given an
+         * end counts the bills it already wrote rather than starting from zero.
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `subscriptions` ADD COLUMN `total_charges` INTEGER")
+                db.execSQL(
+                    "ALTER TABLE `subscriptions` ADD COLUMN `charges_made` INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "UPDATE `subscriptions` SET `charges_made` = " +
+                        "(SELECT COUNT(*) FROM `transactions` " +
+                        "WHERE `transactions`.`subscription` = `subscriptions`.`id`)"
+                )
+            }
+        }
+
         @Volatile
         private var instance: MoneyDatabase? = null
 
@@ -353,6 +377,7 @@ abstract class MoneyDatabase : RoomDatabase() {
                         MIGRATION_4_5,
                         MIGRATION_5_6,
                         MIGRATION_6_7,
+                        MIGRATION_7_8,
                     )
                     .build()
                     .also { instance = it }

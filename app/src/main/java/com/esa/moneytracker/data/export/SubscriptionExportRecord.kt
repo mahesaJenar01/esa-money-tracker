@@ -42,6 +42,14 @@ data class SubscriptionExportRecord(
     @SerialName("time") val time: String = "09:00",
     @SerialName("charged_through_iso") val chargedThroughIso: String = "",
     @SerialName("paused_iso") val pausedIso: String = "",
+    /**
+     * How many bills in all before the plan stops by itself; null runs until
+     * paused. Absent from files written before plans could end, which reads as
+     * null — exactly what every plan in those files was.
+     */
+    @SerialName("total_charges") val totalCharges: Int? = null,
+    /** Bills written so far; travels with the watermark for the same reason. */
+    @SerialName("charges_made") val chargesMade: Int = 0,
     @SerialName("created_iso") val createdIso: String = "",
     @SerialName("updated_iso") val updatedIso: String = "",
 ) {
@@ -70,6 +78,9 @@ data class SubscriptionExportRecord(
             // makes: a plan never charges for a stretch older than itself.
             chargedThrough = (parse(chargedThroughIso) ?: created).toEpochMilli(),
             pausedAt = parse(pausedIso)?.toEpochMilli(),
+            totalCharges = totalCharges?.takeIf { it > 0 }
+                ?.coerceAtMost(Subscription.MAX_TOTAL_CHARGES),
+            chargesMade = chargesMade.coerceAtLeast(0),
             createdAt = created.toEpochMilli(),
             updatedAt = parse(updatedIso)?.toEpochMilli(),
             deletedAt = null,
@@ -98,6 +109,8 @@ data class SubscriptionExportRecord(
             time = "%02d:%02d".format(entity.timeMinutes / 60, entity.timeMinutes % 60),
             chargedThroughIso = iso(entity.chargedThrough, zone),
             pausedIso = entity.pausedAt?.let { iso(it, zone) }.orEmpty(),
+            totalCharges = entity.totalCharges,
+            chargesMade = entity.chargesMade,
             createdIso = iso(entity.createdAt, zone),
             updatedIso = entity.updatedAt?.let { iso(it, zone) }.orEmpty(),
         )

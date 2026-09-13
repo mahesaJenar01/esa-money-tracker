@@ -210,14 +210,11 @@ fun SubscriptionsScreen(
     }
 }
 
-private fun subtitleFor(totals: SubscriptionTotals): String {
-    val active = totals.activeCount.toString() + " aktif"
-    return if (totals.pausedCount == 0) {
-        active
-    } else {
-        active + " • " + totals.pausedCount + " dijeda"
-    }
-}
+private fun subtitleFor(totals: SubscriptionTotals): String = buildList {
+    add(totals.activeCount.toString() + " aktif")
+    if (totals.pausedCount > 0) add(totals.pausedCount.toString() + " dijeda")
+    if (totals.finishedCount > 0) add(totals.finishedCount.toString() + " selesai")
+}.joinToString(" • ")
 
 @Composable
 private fun TopBar(onBack: () -> Unit) {
@@ -303,6 +300,16 @@ private fun TotalsCard(totals: SubscriptionTotals) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+
+        if (totals.remainingCommitted > 0L) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Sisa tagihan yang ada batas waktunya (cicilan dan sejenisnya): " +
+                    CurrencyFormatter.rupiah(totals.remainingCommitted) + " lagi sampai lunas.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -359,7 +366,9 @@ private fun SubscriptionRow(
     val colors = MoneyTheme.colors
     val subscription = usage.subscription
     val paused = subscription.paused
-    val tint = if (paused) colors.muted else colors.forCategory(subscription.category)
+    val finished = subscription.finished
+    val dimmed = paused || finished
+    val tint = if (dimmed) colors.muted else colors.forCategory(subscription.category)
 
     Column(
         Modifier
@@ -406,7 +415,7 @@ private fun SubscriptionRow(
                 Text(
                     text = CurrencyFormatter.rupiah(subscription.amount),
                     style = MaterialTheme.typography.titleSmall,
-                    color = if (paused) colors.muted else colors.expense,
+                    color = if (dimmed) colors.muted else colors.expense,
                 )
                 Text(
                     text = "per " + subscription.cycle.unit,
@@ -441,12 +450,14 @@ private fun SubscriptionRow(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     RowAction(
                         icon = Icons.Rounded.EditNote,
-                        label = "Ubah",
+                        label = if (finished) "Perpanjang" else "Ubah",
                         tint = MaterialTheme.colorScheme.primary,
                         onClick = onEdit,
                         modifier = Modifier.weight(1f),
                     )
-                    if (paused) {
+                    // A finished plan has nothing to pause: it stopped by itself,
+                    // and giving it more bills is an edit.
+                    if (paused && !finished) {
                         RowAction(
                             icon = Icons.Rounded.PlayCircleOutline,
                             label = "Lanjutkan",
@@ -454,7 +465,7 @@ private fun SubscriptionRow(
                             onClick = onResume,
                             modifier = Modifier.weight(1f),
                         )
-                    } else {
+                    } else if (!finished) {
                         RowAction(
                             icon = Icons.Rounded.PauseCircleOutline,
                             label = "Jeda",
@@ -483,6 +494,10 @@ private fun StatusLine(usage: SubscriptionUsage, today: LocalDate, zone: ZoneId)
     val subscription = usage.subscription
 
     val (text, tint) = when {
+        subscription.finished ->
+            "Selesai — " + subscription.chargesMade + " dari " + subscription.totalCharges +
+                " tagihan sudah tercatat" to colors.income
+
         subscription.paused -> "Dijeda — tidak ada tagihan yang dicatat" to colors.muted
 
         usage.bankMissing ->
@@ -498,7 +513,10 @@ private fun StatusLine(usage: SubscriptionUsage, today: LocalDate, zone: ZoneId)
                     " — menunggu dicatat" to colors.gold
             } else {
                 "Berikutnya " + IndonesianDates.dayAndDate(date) +
-                    " • " + IndonesianDates.untilLabel(date, today) to
+                    " • " + IndonesianDates.untilLabel(date, today) +
+                    subscription.remainingCharges?.let { left ->
+                        if (left == 1) " • terakhir" else " • sisa " + left + " kali"
+                    }.orEmpty() to
                     MaterialTheme.colorScheme.onSurfaceVariant
             }
         }
@@ -546,6 +564,26 @@ private fun subscriptionNotes(usage: SubscriptionUsage, zone: ZoneId): List<Stri
                 CurrencyFormatter.rupiah(usage.chargeCount * subscription.amount)
         },
     )
+
+    val total = subscription.totalCharges
+    val remaining = subscription.remainingCharges
+    when {
+        total == null -> add("Terus berulang sampai kamu hentikan")
+
+        remaining == 0 -> add("Berhenti sendiri setelah " + total + " kali — sudah selesai")
+
+        else -> {
+            val last = subscription.lastDue(zone)?.atZone(zone)?.toLocalDate()
+            add(
+                "Berhenti sendiri setelah " + total + " kali • tinggal " + remaining +
+                    " kali, " + CurrencyFormatter.rupiah(remaining!! * subscription.amount) +
+                    " lagi",
+            )
+            if (last != null && !subscription.paused) {
+                add("Tagihan terakhir " + IndonesianDates.dayAndDate(last))
+            }
+        }
+    }
 
     val created = subscription.createdAt.atZone(zone).toLocalDate()
     add("Dibuat " + IndonesianDates.dayAndDate(created))

@@ -11,16 +11,18 @@ import kotlinx.coroutines.flow.Flow
 interface SubscriptionDao {
 
     /**
-     * Every live plan, running ones first.
+     * Every live plan, running ones first, then paused, then finished.
      *
      * Paused plans sit at the bottom rather than being hidden: a plan that is
      * not charging is still a decision the user made and will want to undo.
+     * Finished ones stay listed too — they can be extended from the edit form.
      */
     @Query(
         """
         SELECT * FROM subscriptions
         WHERE deleted_at IS NULL
-        ORDER BY paused_at IS NOT NULL, amount DESC, name ASC
+        ORDER BY (total_charges IS NOT NULL AND charges_made >= total_charges),
+            paused_at IS NOT NULL, amount DESC, name ASC
         """
     )
     fun observeAll(): Flow<List<SubscriptionEntity>>
@@ -29,7 +31,13 @@ interface SubscriptionDao {
     suspend fun findById(id: String): SubscriptionEntity?
 
     /** What the catch-up run reads: everything that could owe a charge. */
-    @Query("SELECT * FROM subscriptions WHERE deleted_at IS NULL AND paused_at IS NULL")
+    @Query(
+        """
+        SELECT * FROM subscriptions
+        WHERE deleted_at IS NULL AND paused_at IS NULL
+            AND (total_charges IS NULL OR charges_made < total_charges)
+        """
+    )
     suspend fun getDueCandidates(): List<SubscriptionEntity>
 
     @Query("SELECT * FROM subscriptions WHERE deleted_at IS NULL ORDER BY created_at ASC")
@@ -45,9 +53,18 @@ interface SubscriptionDao {
     @Query("SELECT id FROM subscriptions")
     suspend fun allIds(): List<String>
 
-    /** Moves the watermark after a run, without touching anything else. */
-    @Query("UPDATE subscriptions SET charged_through = :chargedThrough WHERE id = :id")
-    suspend fun markChargedThrough(id: String, chargedThrough: Long)
+    /**
+     * Moves the watermark after a run and counts the bills just written,
+     * without touching anything else.
+     */
+    @Query(
+        """
+        UPDATE subscriptions
+        SET charged_through = :chargedThrough, charges_made = charges_made + :count
+        WHERE id = :id
+        """
+    )
+    suspend fun markChargedThrough(id: String, chargedThrough: Long, count: Int)
 
     /**
      * Writes a plan's due charges and moves its watermark, both or neither.
@@ -68,7 +85,7 @@ interface SubscriptionDao {
         charges: List<TransactionEntity>,
     ) {
         insertCharges(charges)
-        markChargedThrough(id, chargedThrough)
+        markChargedThrough(id, chargedThrough, charges.size)
     }
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

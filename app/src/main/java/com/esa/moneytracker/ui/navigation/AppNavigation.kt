@@ -446,6 +446,9 @@ private fun SubscriptionRoute(
         onChooseDayOfMonth = viewModel::chooseDayOfMonth,
         onChooseDayOfWeek = viewModel::chooseDayOfWeek,
         onTimeChanged = viewModel::onTimeChanged,
+        onChooseLimited = viewModel::chooseLimited,
+        onCountChanged = viewModel::onCountChanged,
+        onStepCount = viewModel::stepCount,
         onBack = { navController.popBackStack() },
         onSubmit = viewModel::submit,
     )

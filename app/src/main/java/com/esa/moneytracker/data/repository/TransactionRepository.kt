@@ -628,7 +628,7 @@ class TransactionRepository(
                     // second opinion about it. In the ordinary case the run has
                     // just finished and the answer is in the future; when it is
                     // not, there really is a charge waiting to be written.
-                    nextDue = if (subscription.paused) {
+                    nextDue = if (!subscription.active) {
                         null
                     } else {
                         subscription.nextDueAfter(subscription.chargedThrough, zone)
@@ -661,9 +661,12 @@ class TransactionRepository(
         dayOfMonth: Int,
         dayOfWeek: DayOfWeek,
         timeOfDay: LocalTime,
+        /** How many bills in all before it stops by itself; null for no end. */
+        totalCharges: Int?,
         now: Instant = Instant.now(),
     ): Subscription? {
         if (amount <= 0L || name.isBlank()) return null
+        if (totalCharges != null && totalCharges < 1) return null
         val subscription = Subscription(
             id = UUID.randomUUID().toString(),
             name = name.trim(),
@@ -676,6 +679,7 @@ class TransactionRepository(
             dayOfWeek = dayOfWeek,
             timeOfDay = timeOfDay,
             chargedThrough = now,
+            totalCharges = totalCharges?.coerceAtMost(Subscription.MAX_TOTAL_CHARGES),
             createdAt = now,
         )
         subscriptionDao.upsert(subscription.toEntity())
@@ -694,6 +698,11 @@ class TransactionRepository(
      * Notes the plan has already written are untouched. They are records of
      * money that moved on a day; rewriting them because the price went up would
      * be rewriting history.
+     *
+     * [totalCharges] counts the bills already written, so it can never go below
+     * them. The one time the watermark does move is when a finished plan is
+     * given more bills: it starts again from [now], exactly like resuming, so
+     * the months it sat finished are not billed all at once.
      */
     suspend fun updateSubscription(
         original: Subscription,
@@ -706,10 +715,22 @@ class TransactionRepository(
         dayOfMonth: Int,
         dayOfWeek: DayOfWeek,
         timeOfDay: LocalTime,
+        totalCharges: Int?,
         now: Instant = Instant.now(),
-    ): Subscription? {
-        if (amount <= 0L || name.isBlank()) return null
-        val updated = original.copy(
+    ): Subscription? = subscriptionRuns.withLock {
+        if (amount <= 0L || name.isBlank()) return@withLock null
+        // The form was filled in from a copy read when it opened; the catch-up
+        // run may have written a bill since. Rewriting the row from that copy
+        // would roll the watermark back and charge the same bill twice, so the
+        // bookkeeping is taken from the row as it is now, under the same lock
+        // the run holds.
+        val current = subscriptionDao.findById(original.id)?.toDomain() ?: original
+        val total = totalCharges
+            ?.coerceIn(maxOf(1, current.chargesMade), Subscription.MAX_TOTAL_CHARGES)
+        val reopened = current.finished && (total == null || total > current.chargesMade)
+        val updated = current.copy(
+            totalCharges = total,
+            chargedThrough = if (reopened) now else current.chargedThrough,
             name = name.trim(),
             amount = amount,
             categoryId = category.id,
@@ -722,7 +743,7 @@ class TransactionRepository(
             updatedAt = now,
         )
         subscriptionDao.upsert(updated.toEntity())
-        return updated
+        updated
     }
 
     /**

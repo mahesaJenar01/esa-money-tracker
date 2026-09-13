@@ -84,6 +84,17 @@ data class SubscriptionEntity(
     @ColumnInfo(name = "paused_at")
     val pausedAt: Long? = null,
 
+    /** How many bills the plan writes before it stops by itself; null runs forever. */
+    @ColumnInfo(name = "total_charges")
+    val totalCharges: Int? = null,
+
+    /**
+     * Bills written so far. Moved in the same transaction as `charged_through`,
+     * so the two can never disagree about what has been charged.
+     */
+    @ColumnInfo(name = "charges_made", defaultValue = "0")
+    val chargesMade: Int = 0,
+
     @ColumnInfo(name = "created_at")
     val createdAt: Long,
 
@@ -114,6 +125,8 @@ fun SubscriptionEntity.toDomain(): Subscription = Subscription(
     timeOfDay = LocalTime.ofSecondOfDay(timeMinutes.coerceIn(0, 24 * 60 - 1) * 60L),
     chargedThrough = Instant.ofEpochMilli(chargedThrough),
     pausedAt = pausedAt?.let(Instant::ofEpochMilli),
+    totalCharges = totalCharges?.coerceIn(1, Subscription.MAX_TOTAL_CHARGES),
+    chargesMade = chargesMade.coerceAtLeast(0),
     createdAt = Instant.ofEpochMilli(createdAt),
     updatedAt = updatedAt?.let(Instant::ofEpochMilli),
     deletedAt = deletedAt?.let(Instant::ofEpochMilli),
@@ -132,6 +145,8 @@ fun Subscription.toEntity(): SubscriptionEntity = SubscriptionEntity(
     timeMinutes = timeOfDay.hour * 60 + timeOfDay.minute,
     chargedThrough = chargedThrough.toEpochMilli(),
     pausedAt = pausedAt?.toEpochMilli(),
+    totalCharges = totalCharges,
+    chargesMade = chargesMade,
     createdAt = createdAt.toEpochMilli(),
     updatedAt = updatedAt?.toEpochMilli(),
     deletedAt = deletedAt?.toEpochMilli(),

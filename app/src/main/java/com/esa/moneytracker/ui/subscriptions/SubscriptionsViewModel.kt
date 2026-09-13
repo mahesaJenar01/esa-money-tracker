@@ -32,7 +32,7 @@ data class SubscriptionsUiState(
     val isEmpty: Boolean get() = !loading && items.isEmpty()
 
     /** True when at least one plan is stuck because its bank was closed. */
-    val hasStalled: Boolean get() = items.any { it.bankMissing && !it.subscription.paused }
+    val hasStalled: Boolean get() = items.any { it.bankMissing && it.subscription.active }
 }
 
 /**

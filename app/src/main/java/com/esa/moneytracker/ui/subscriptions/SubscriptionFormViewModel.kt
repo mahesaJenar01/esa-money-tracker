@@ -51,6 +51,11 @@ data class SubscriptionFormUiState(
     val dayOfWeek: DayOfWeek = DayOfWeek.MONDAY,
     val timeOfDay: LocalTime = Subscription.DEFAULT_TIME,
 
+    /** False: runs until paused or deleted. True: stops after [countDigits] bills. */
+    val limited: Boolean = false,
+    /** Raw digits of how many bills in all, used only while [limited]. */
+    val countDigits: String = "",
+
     val showErrors: Boolean = false,
     val saving: Boolean = false,
     val saved: Boolean = false,
@@ -80,6 +85,28 @@ data class SubscriptionFormUiState(
     val bankError: String?
         get() = if (pocket == Pocket.ONLINE && bankId == null) "Pilih bank pembayarnya" else null
 
+    /** Bills the plan being edited has already written; zero for a new one. */
+    val chargesMade: Int get() = original?.chargesMade ?: 0
+
+    /** How many bills in all, or null for a plan without an end. */
+    val totalCharges: Int?
+        get() = if (limited) countDigits.toIntOrNull() else null
+
+    val countError: String?
+        get() {
+            if (!limited) return null
+            val count = countDigits.toIntOrNull()
+            return when {
+                count == null -> "Isi berapa kali tagihannya"
+                count < 1 -> "Minimal 1 kali"
+                count > Subscription.MAX_TOTAL_CHARGES ->
+                    "Maksimal " + Subscription.MAX_TOTAL_CHARGES + " kali"
+                count < chargesMade ->
+                    "Sudah tercatat " + chargesMade + " kali, jadi minimal " + chargesMade
+                else -> null
+            }
+        }
+
     /**
      * The plan exactly as it would be saved, for the preview.
      *
@@ -89,9 +116,14 @@ data class SubscriptionFormUiState(
      */
     val preview: Subscription?
         get() {
-            if (amountError != null || nameError != null) return null
+            if (amountError != null || nameError != null || countError != null) return null
             val base = original
-            val settled = base?.chargedThrough ?: now
+            val total = totalCharges
+            // Mirrors the repository: a finished plan given more bills starts
+            // again from now rather than billing the months it sat finished.
+            val reopened = base != null && base.finished &&
+                (total == null || total > base.chargesMade)
+            val settled = if (base == null || reopened) now else base.chargedThrough
             return Subscription(
                 id = base?.id ?: "preview",
                 name = name.trim(),
@@ -104,6 +136,8 @@ data class SubscriptionFormUiState(
                 dayOfWeek = dayOfWeek,
                 timeOfDay = timeOfDay,
                 chargedThrough = settled,
+                totalCharges = total,
+                chargesMade = chargesMade,
                 createdAt = base?.createdAt ?: now,
             )
         }
@@ -119,12 +153,14 @@ data class SubscriptionFormUiState(
                 cycle != source.cycle ||
                 dayOfMonth != source.dayOfMonth ||
                 dayOfWeek != source.dayOfWeek ||
-                timeOfDay != source.timeOfDay
+                timeOfDay != source.timeOfDay ||
+                totalCharges != source.totalCharges
         }
 
     val canSubmit: Boolean
         get() = !saving && hasChanges &&
-            nameError == null && amountError == null && bankError == null
+            nameError == null && amountError == null && bankError == null &&
+            countError == null
 }
 
 /**
@@ -194,6 +230,8 @@ class SubscriptionFormViewModel(
                         dayOfMonth = subscription.dayOfMonth,
                         dayOfWeek = subscription.dayOfWeek,
                         timeOfDay = subscription.timeOfDay,
+                        limited = subscription.totalCharges != null,
+                        countDigits = subscription.totalCharges?.toString().orEmpty(),
                     )
                 }
             }
@@ -232,6 +270,34 @@ class SubscriptionFormViewModel(
 
     fun onTimeChanged(time: LocalTime) = form.update { it.copy(timeOfDay = time) }
 
+    /**
+     * Switches between "terus menerus" and "sekian kali". Turning the limit on
+     * for the first time suggests a year of bills, one more than any already
+     * written, so the field never opens on a number that is already an error.
+     */
+    fun chooseLimited(limited: Boolean) = form.update {
+        val suggestion = maxOf(
+            if (it.cycle == BillingCycle.WEEKLY) 52 else 12,
+            it.chargesMade + 1,
+        )
+        it.copy(
+            limited = limited,
+            countDigits = it.countDigits.ifBlank { suggestion.toString() },
+        )
+    }
+
+    /** Accepts anything and keeps only the digits. */
+    fun onCountChanged(raw: String) = form.update {
+        it.copy(countDigits = raw.filter(Char::isDigit).trimStart('0').take(3))
+    }
+
+    /** The - and + beside the field. Never below one, never above the ceiling. */
+    fun stepCount(delta: Int) = form.update {
+        val current = it.countDigits.toIntOrNull() ?: 0
+        val next = (current + delta).coerceIn(1, Subscription.MAX_TOTAL_CHARGES)
+        it.copy(countDigits = next.toString())
+    }
+
     fun submit() {
         val current = state.value
         if (!current.canSubmit) {
@@ -253,6 +319,7 @@ class SubscriptionFormViewModel(
                     dayOfMonth = current.dayOfMonth,
                     dayOfWeek = current.dayOfWeek,
                     timeOfDay = current.timeOfDay,
+                    totalCharges = current.totalCharges,
                 )
             } else {
                 repository.updateSubscription(
@@ -266,6 +333,7 @@ class SubscriptionFormViewModel(
                     dayOfMonth = current.dayOfMonth,
                     dayOfWeek = current.dayOfWeek,
                     timeOfDay = current.timeOfDay,
+                    totalCharges = current.totalCharges,
                 )
             }
             // Saving can move a bill into the past — an edit that pulls the

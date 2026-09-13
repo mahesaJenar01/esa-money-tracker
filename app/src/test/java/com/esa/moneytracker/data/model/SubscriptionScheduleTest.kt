@@ -220,4 +220,88 @@ class SubscriptionScheduleTest {
         assertEquals(1, totals.activeCount)
         assertEquals(1, totals.pausedCount)
     }
+
+    @Test
+    fun `a plan with an end never writes more than the bills it has left`() {
+        // Cicilan mobil, five payments left, and the phone not opened for a year.
+        val cicilan = monthly(day = 5, amount = 3_000_000L, chargedThrough = at("2026-09-13"))
+            .copy(totalCharges = 5)
+
+        val due = cicilan.dueBetween(cicilan.chargedThrough, at("2027-09-13"), zone)
+
+        assertEquals(
+            listOf(
+                at("2026-10-05"), at("2026-11-05"), at("2026-12-05"),
+                at("2027-01-05"), at("2027-02-05"),
+            ),
+            due,
+        )
+        assertEquals(at("2027-02-05"), cicilan.lastDue(zone))
+    }
+
+    @Test
+    fun `the counter carries across runs and the plan finishes by itself`() {
+        val cicilan = monthly(day = 5, chargedThrough = at("2026-09-13")).copy(totalCharges = 3)
+
+        val first = cicilan.dueBetween(cicilan.chargedThrough, at("2026-11-20"), zone)
+        assertEquals(2, first.size)
+
+        // What the runner commits: the watermark and the counter together.
+        val afterFirst = cicilan.copy(chargedThrough = first.last(), chargesMade = first.size)
+        assertEquals(1, afterFirst.remainingCharges)
+        assertEquals(at("2026-12-05"), afterFirst.lastDue(zone))
+
+        val second = afterFirst.dueBetween(afterFirst.chargedThrough, at("2027-06-01"), zone)
+        assertEquals(listOf(at("2026-12-05")), second)
+
+        val done = afterFirst.copy(chargedThrough = second.last(), chargesMade = 3)
+        assertTrue(done.finished)
+        assertTrue(done.dueBetween(done.chargedThrough, at("2030-01-01"), zone).isEmpty())
+        assertEquals(null, done.lastDue(zone))
+    }
+
+    @Test
+    fun `a plan without an end keeps going`() {
+        val youtube = monthly(day = 2, chargedThrough = at("2026-01-01"))
+
+        assertEquals(null, youtube.remainingCharges)
+        assertEquals(false, youtube.finished)
+        assertEquals(null, youtube.lastDue(zone))
+        assertEquals(24, youtube.dueBetween(youtube.chargedThrough, at("2027-12-31"), zone).size)
+    }
+
+    @Test
+    fun `a finished plan drops out of the monthly total`() {
+        val today = LocalDate.of(2026, 9, 13)
+        val now = at("2026-09-13", "20:30")
+        val youtube = monthly(day = 2, amount = 100_000L, chargedThrough = now)
+        val lunas = monthly(day = 20, amount = 3_000_000L, chargedThrough = at("2026-08-20"))
+            .copy(id = "sub-lunas", totalCharges = 6, chargesMade = 6)
+
+        val totals = subscriptionTotalsOf(listOf(youtube, lunas), today, now, zone)
+
+        assertEquals(100_000L, totals.perMonth)
+        assertEquals(1, totals.activeCount)
+        assertEquals(1, totals.finishedCount)
+        assertEquals(0, totals.pausedCount)
+        // The cicilan is paid off, so the 20th of this month is not coming.
+        assertEquals(100_000L, totals.thisMonth)
+        assertEquals(0L, totals.remainingThisMonth)
+    }
+
+    @Test
+    fun `the calendar month only counts the bills a plan still has`() {
+        val today = LocalDate.of(2026, 9, 1)
+        val now = at("2026-09-01", "08:00")
+        // Weekly, one bill left: four Mondays in the rest of September, but only
+        // the first of them will ever be written.
+        val lastOne = weekly(DayOfWeek.MONDAY, amount = 30_000L, chargedThrough = now)
+            .copy(totalCharges = 10, chargesMade = 9)
+
+        val totals = subscriptionTotalsOf(listOf(lastOne), today, now, zone)
+
+        assertEquals(30_000L, totals.thisMonth)
+        assertEquals(30_000L, totals.remainingThisMonth)
+        assertEquals(30_000L, totals.remainingCommitted)
+    }
 }

@@ -270,6 +270,39 @@ month, and how much of that has not come due yet. The two disagree in any month
 where a weekly bill lands five times, and they are both true — one is the rate,
 the other is the month.
 
+### Plans that end by themselves
+
+Not every fixed bill is forever. A cicilan mobil with five payments left, a
+tagihan paid off over a year, a subscription bought for six months — each has
+a last bill, and the form asks for it under **Sampai kapan?**:
+
+| Choice | Stored as | Behaviour |
+| --- | --- | --- |
+| Terus menerus | `total_charges = NULL` | bills until paused or deleted |
+| Sekian kali | `total_charges = N` | writes N bills in all, then stops by itself |
+
+`charges_made` counts the bills written, and moves in the **same Room
+transaction** as `charged_through` — the two can never disagree about what has
+been charged. It is a counter on the plan rather than a count of notes, so
+deleting a charge that was entered wrong does not hand the plan an extra bill.
+The catch-up run never writes more than `total_charges - charges_made`, however
+long the phone was not opened, and a plan that reaches its count drops out of
+`getDueCandidates()`.
+
+N counts from the next bill for a new plan, and includes the bills already
+written for an edit ("cicilan 12 kali" is how the contract says it); the form
+spells out how many are behind, how many are left, the date of the last one and
+what is left to pay. A **finished** plan is listed at the bottom as *Selesai*,
+leaves every total, and can be extended with *Perpanjang* — which restarts the
+watermark from now, like resuming, so the months it sat finished are not billed
+at once. The Langganan page adds up what the running plans with an end still
+owe as one "sisa sampai lunas" figure.
+
+Database v8 adds the two columns; existing plans get `total_charges = NULL`, so
+nothing about them changes, and `charges_made` is backfilled from the notes each
+one had already written. Backups carry both fields; an older file without them
+reads as "terus menerus".
+
 ### Pausing, editing and deleting
 
 **Jeda** stops a plan charging without forgetting it. Pausing settles the
