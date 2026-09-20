@@ -114,10 +114,21 @@ echo     uninstalling it first, which deletes your recorded transactions.
 goto :done
 
 rem ---------------------------------------------------------------------------
-rem  Building a release. Bumps versionCode first: the phone compares that number
-rem  and refuses anything that is not higher than what it already has.
+rem  Building a release. The file in dist\ is named after versionName AND
+rem  versionCode, so two releases can never land on the same name and quietly
+rem  overwrite each other. versionCode has to go up every time: the phone
+rem  compares that number and refuses anything that is not higher than what it
+rem  already has. The bump is written before the build, because Gradle reads it
+rem  out of version.properties, and put back if the build or the copy fails, so
+rem  a broken build does not burn a version.
 rem ---------------------------------------------------------------------------
 :release
+rem  The one line to change when this script is copied to another app.
+set "APPNAME=esa-money-tracker"
+rem  How many builds dist\ keeps. After a signed release the older ones are
+rem  deleted, so there is always something to fall back to if the new one is bad.
+set "KEEP=3"
+
 if not exist "%PROJ%version.properties" (
   echo [X] version.properties is missing.
   goto :fail
@@ -131,19 +142,18 @@ if not defined VCODE (
   echo [X] version.properties has no versionCode.
   goto :fail
 )
+set "OLDCODE=%VCODE%"
 set /a VCODE=VCODE+1
 
-> "%PROJ%version.properties" (
-  echo # The version the next release APK is built with.
-  echo #
-  echo # versionCode is what Android compares when installing over an existing copy: it
-  echo # must go up every time, or the phone refuses the update. "run.bat release"
-  echo # bumps it for you, so this file is not something to edit by hand.
-  echo #
-  echo # versionName is the human label. Change it whenever a release is worth a name.
-  echo versionCode=%VCODE%
-  echo versionName=%VNAME%
+set "OUT=dist\%APPNAME%-%VNAME%-%VCODE%.apk"
+if exist "%PROJ%%OUT%" (
+  echo [X] %OUT% already exists, and this script never overwrites a release.
+  echo     Nothing was built: version.properties still says versionCode %OLDCODE%.
+  echo     Move that file out of dist\ if it is stale, then run this again.
+  goto :fail
 )
+
+call :writeversion %VCODE%
 
 echo == Building release %VNAME% ^(versionCode %VCODE%^) ==
 if not exist "%PROJ%keystore.properties" (
@@ -153,7 +163,7 @@ if not exist "%PROJ%keystore.properties" (
   echo.
 )
 
-call "%PROJ%gradlew.bat" :app:assembleRelease || goto :fail
+call "%PROJ%gradlew.bat" :app:assembleRelease || goto :unbump
 
 set "RAPK=app\build\outputs\apk\release\app-release.apk"
 set "SIGNED=yes"
@@ -163,12 +173,15 @@ if not exist "%RAPK%" (
 )
 if not exist "%RAPK%" (
   echo [X] Build reported success but no release APK was produced.
-  goto :fail
+  goto :unbump
 )
 
 if not exist "%PROJ%dist" mkdir "%PROJ%dist"
-set "OUT=dist\esa-money-tracker-%VNAME%.apk"
-copy /y "%RAPK%" "%PROJ%%OUT%" >nul || goto :fail
+if exist "%PROJ%%OUT%" (
+  echo [X] %OUT% appeared while the build was running. Refusing to overwrite it.
+  goto :unbump
+)
+copy /y "%RAPK%" "%PROJ%%OUT%" >nul || goto :unbump
 
 echo.
 if "%SIGNED%"=="no" (
@@ -179,11 +192,32 @@ if "%SIGNED%"=="no" (
 )
 echo [OK] %OUT%
 echo      version %VNAME%, versionCode %VCODE%
+echo      %PROJ%%OUT%
+echo.
+echo      Publish it so Obtainium sees the update:
+echo.
+echo          gh release create v%VNAME% "%OUT%" --title "v%VNAME%" --notes "%APPNAME% %VNAME% (build %VCODE%)"
 echo.
 echo      Put this file where the phone can reach it, open it there, and tap
 echo      install. It installs over the existing app and keeps every recorded
 echo      transaction. See README.md, "Updating the app on your phone".
+echo.
+echo      dist\ keeps the %KEEP% most recent builds, so there is something to go
+echo      back to if this one turns out bad. Anything older than that goes:
+set "NTH=0"
+for /f "usebackq delims=" %%F in (`dir /b /a-d /o-d "%PROJ%dist\%APPNAME%-*.apk" 2^>nul`) do call :prune "%%F"
 goto :done
+
+rem ---------------------------------------------------------------------------
+rem  The build or the copy failed, so the release this run claimed a number for
+rem  does not exist. Put the old versionCode back: otherwise every failed
+rem  attempt would eat a number.
+rem ---------------------------------------------------------------------------
+:unbump
+call :writeversion %OLDCODE%
+echo.
+echo [!] versionCode put back to %OLDCODE%; no release file was produced.
+goto :fail
 
 :build
 echo == Building debug APK ==
@@ -240,3 +274,44 @@ exit /b 1
 popd 2>nul
 endlocal
 exit /b 0
+
+rem ---------------------------------------------------------------------------
+rem  Rewrites version.properties. The versionCode to store is the argument;
+rem  versionName comes from VNAME. Used to bump the number before a release
+rem  build, and to put the old number back when that build fails.
+rem ---------------------------------------------------------------------------
+:writeversion
+> "%PROJ%version.properties" (
+  echo # The version the next release APK is built with.
+  echo #
+  echo # versionCode is what Android compares when installing over an existing copy: it
+  echo # must go up every time, or the phone refuses the update. "run.bat release"
+  echo # bumps it for you, so this file is not something to edit by hand.
+  echo #
+  echo # versionName is the human label. Change it whenever a release is worth a name.
+  echo versionCode=%~1
+  echo versionName=%VNAME%
+)
+goto :eof
+
+rem ---------------------------------------------------------------------------
+rem  Deletes one file from dist\, unless it is among the KEEP most recent. The
+rem  caller walks dist\ newest first and calls this once per file; NTH counts how
+rem  far down that list we are. It is a subroutine rather than the body of the
+rem  loop because a counter cannot be read back inside the loop that sets it.
+rem
+rem  "Newest" is the file's timestamp (dir /o-d), which follows the order the
+rem  releases were built, because copy keeps the time the APK was built. Only
+rem  files this script named itself are ever listed, so nothing else you put in
+rem  dist\ is touched.
+rem ---------------------------------------------------------------------------
+:prune
+set /a NTH+=1
+if %NTH% LEQ %KEEP% goto :eof
+del "%PROJ%dist\%~1" >nul 2>&1
+if exist "%PROJ%dist\%~1" (
+  echo          [!] could not delete dist\%~1 - is it open somewhere?
+) else (
+  echo          deleted dist\%~1
+)
+goto :eof
