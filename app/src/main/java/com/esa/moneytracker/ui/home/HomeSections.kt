@@ -19,8 +19,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.rounded.Payments
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.Savings
+import androidx.compose.material.icons.rounded.TipsAndUpdates
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -187,6 +193,248 @@ fun AnalyticsCard(
                 Spacer(Modifier.height(10.dp))
             }
         }
+    }
+}
+
+/**
+ * A concise, bounded explanation of the selected analytics window.
+ *
+ * The facts are produced through [FinancialInsightProvider]. Today the summary
+ * is deterministic and stays on-device; the structured facts can be handed to
+ * an API later without changing this card or sending an unbounded history.
+ */
+@Composable
+fun AiInsightCard(
+    state: HomeUiState,
+    modifier: Modifier = Modifier,
+) {
+    val insight = state.financialInsight
+    val colors = MoneyTheme.colors
+
+    SoftCard(modifier = modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.AutoAwesome,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(23.dp),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "Ringkasan AI",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = state.periodSubtitle + " • analisis lokal sementara",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = "BETA",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(horizontal = 9.dp, vertical = 5.dp),
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = insight.summary,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+
+        if (insight.transactionCount > 0) {
+            Spacer(Modifier.height(16.dp))
+
+            insight.largestExpense?.let { expense ->
+                InsightFact(
+                    icon = Icons.Rounded.ArrowUpward,
+                    iconTint = colors.expense,
+                    iconContainer = colors.expenseContainer,
+                    label = "Pengeluaran terbesar",
+                    title = expense.description,
+                    value = CurrencyFormatter.rupiah(expense.amount),
+                )
+            }
+
+            insight.repeatedExpense?.let { repeated ->
+                Spacer(Modifier.height(10.dp))
+                InsightFact(
+                    icon = Icons.Rounded.Repeat,
+                    iconTint = colors.gold,
+                    iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                    label = "Sering dilakukan • ${repeated.count} kali",
+                    title = repeated.label,
+                    value = CurrencyFormatter.rupiah(repeated.total),
+                )
+            }
+
+            insight.largestIncome?.let { income ->
+                Spacer(Modifier.height(10.dp))
+                InsightFact(
+                    icon = Icons.Rounded.Payments,
+                    iconTint = colors.income,
+                    iconContainer = colors.incomeContainer,
+                    label = "Pendapatan terbesar",
+                    title = income.description,
+                    value = CurrencyFormatter.rupiah(income.amount),
+                )
+            }
+
+            val differences = insight.balanceDifferences
+            Spacer(Modifier.height(10.dp))
+            InsightFact(
+                icon = Icons.Rounded.CheckCircle,
+                iconTint = if (differences.mismatchCount == 0) colors.income else colors.expense,
+                iconContainer = if (differences.mismatchCount == 0) {
+                    colors.incomeContainer
+                } else {
+                    colors.expenseContainer
+                },
+                label = "Kecocokan saldo",
+                title = when {
+                    differences.checkCount == 0 -> "Belum ada cek saldo di periode ini"
+                    differences.mismatchCount == 0 -> "Semua ${differences.checkCount} cek cocok"
+                    else -> "${differences.mismatchCount} dari ${differences.checkCount} cek • " +
+                        "terbesar ${CurrencyFormatter.rupiah(differences.largestAbsoluteDifference)}"
+                },
+                value = when {
+                    differences.checkCount == 0 -> "—"
+                    differences.mismatchCount == 0 -> "Tepat"
+                    else -> "Total " + CurrencyFormatter.rupiah(differences.totalAbsoluteDifference)
+                },
+            )
+
+            insight.savingRatePercent?.let { rate ->
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(colors.incomeContainer)
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Savings,
+                        contentDescription = null,
+                        tint = colors.income,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = "Perkiraan porsi tersimpan",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "$rate%",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (rate >= 0) colors.income else colors.expense,
+                    )
+                }
+            }
+        }
+
+        if (insight.suggestions.isNotEmpty()) {
+            Spacer(Modifier.height(18.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Rounded.TipsAndUpdates,
+                    contentDescription = null,
+                    tint = colors.gold,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Saran untukmu",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            insight.suggestions.forEach { suggestion ->
+                Row(Modifier.padding(vertical = 4.dp)) {
+                    Text(
+                        text = "•",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = suggestion,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InsightFact(
+    icon: ImageVector,
+    iconTint: Color,
+    iconContainer: Color,
+    label: String,
+    title: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .border(1.dp, MoneyTheme.colors.hairline, RoundedCornerShape(16.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(iconContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 

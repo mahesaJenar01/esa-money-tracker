@@ -74,6 +74,8 @@ data class HomeUiState(
     val periodExpense: Long = 0,
     val periodCount: Int = 0,
     val breakdown: List<CategorySlice> = emptyList(),
+    /** Smart summary for the selected analytics window, locally generated for now. */
+    val financialInsight: FinancialInsight = FinancialInsight(),
 
     val latest: Transaction? = null,
 

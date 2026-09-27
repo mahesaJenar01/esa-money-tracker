@@ -49,6 +49,7 @@ private data class HomeInputs(
 class HomeViewModel(
     private val repository: TransactionRepository,
     private val zone: ZoneId = ZoneId.systemDefault(),
+    private val insightProvider: FinancialInsightProvider = LocalFinancialInsightProvider,
 ) : ViewModel() {
 
     private val selectedPeriod = MutableStateFlow(AnalyticsPeriod.WEEKLY)
@@ -118,6 +119,7 @@ class HomeViewModel(
         val inPeriod = transactions.filter { period.contains(it.dateIn(zone), today) }
         val periodIncome = inPeriod.filter { it.type == TransactionType.INCOME }.sumOf { it.amount }
         val periodExpense = inPeriod.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
+        val checksInPeriod = checks.filter { period.contains(it.dateIn(zone), today) }
 
         // The breakdown answers "where did my money go this week", so it only
         // covers expenses; income has just two categories and its own total.
@@ -158,6 +160,7 @@ class HomeViewModel(
             periodExpense = periodExpense,
             periodCount = inPeriod.size,
             breakdown = breakdown,
+            financialInsight = insightProvider.summarize(inPeriod, checksInPeriod),
             latest = transactions.firstOrNull(),
             subscriptions = subscriptionTotalsOf(
                 subscriptions = subscriptions.map { it.subscription },

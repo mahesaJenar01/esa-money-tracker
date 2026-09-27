@@ -157,6 +157,18 @@ fun HomeScreen(
                 }
             }
 
+            item("ai-insight") {
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    Spacer(Modifier.height(22.dp))
+                    SectionHeader(
+                        title = "Asisten keuangan",
+                        subtitle = "Pola dan saran dari periode terpilih",
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    AiInsightCard(state)
+                }
+            }
+
             state.latest?.let { latest ->
                 item("latest") {
                     Column(Modifier.padding(horizontal = 16.dp)) {

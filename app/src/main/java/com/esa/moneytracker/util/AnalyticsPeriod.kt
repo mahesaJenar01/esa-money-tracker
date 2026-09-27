@@ -6,9 +6,9 @@ import java.time.LocalDate
 /**
  * The window the home screen summarises.
  *
- * Only [WEEKLY] is offered today. Adding `MONTHLY` or `YEARLY` means adding a
- * constant here with its own [startOf] / [endExclusiveOf] — the screen, the
- * selector and the view model all read the enum and need no changes.
+ * This window only controls analytics. Riwayat deliberately keeps its own
+ * Monday-to-Sunday paging even when [MONTHLY] is selected here, so a longer
+ * report never turns the home screen into an endless list.
  */
 enum class AnalyticsPeriod(val id: String, val label: String) {
 
@@ -16,6 +16,11 @@ enum class AnalyticsPeriod(val id: String, val label: String) {
         override fun startOf(today: LocalDate): LocalDate = today.with(DayOfWeek.MONDAY)
         override fun endExclusiveOf(today: LocalDate): LocalDate = startOf(today).plusWeeks(1)
         override fun subtitle(today: LocalDate): String = "Minggu ini"
+    },
+    MONTHLY("monthly", "Bulanan") {
+        override fun startOf(today: LocalDate): LocalDate = today.withDayOfMonth(1)
+        override fun endExclusiveOf(today: LocalDate): LocalDate = startOf(today).plusMonths(1)
+        override fun subtitle(today: LocalDate): String = "Bulan ini"
     },
     ;
 
