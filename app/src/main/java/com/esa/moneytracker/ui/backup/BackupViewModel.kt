@@ -241,7 +241,11 @@ suspend fun runImport(
         return BackupMessage("Berkas cadangan ini kosong.", ok = false)
     }
 
-    val result = repository.importBackup(document)
+    val result = try {
+        repository.importBackup(document)
+    } catch (error: IllegalArgumentException) {
+        return BackupMessage(error.message ?: "Cadangan tidak valid; data lama tetap utuh.", ok = false)
+    }
     val parts = buildList {
         if (result.added > 0) add(result.added.toString() + " catatan ditambahkan")
         if (result.updated > 0) add(result.updated.toString() + " catatan diperbarui")

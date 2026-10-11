@@ -12,6 +12,7 @@ import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.data.model.Transfer
 import com.esa.moneytracker.data.repository.TransactionRepository
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
@@ -61,6 +62,7 @@ sealed interface BinnedItem {
 
 data class BinUiState(
     val loading: Boolean = true,
+    val message: String? = null,
     val items: List<BinnedItem> = emptyList(),
     val bankNames: Map<String, String> = emptyMap(),
     val bankColors: Map<String, BankColor> = emptyMap(),
@@ -78,6 +80,10 @@ class BinViewModel(
     private val repository: TransactionRepository,
 ) : ViewModel() {
 
+    private val message = MutableStateFlow<String?>(null)
+
+    fun dismissMessage() { message.value = null }
+
     val state: StateFlow<BinUiState> =
         combine(
             repository.observeDeleted(),
@@ -94,7 +100,7 @@ class BinViewModel(
                 bankNames = banks.associate { it.id to it.name },
                 bankColors = banks.associate { it.id to it.color },
             )
-        }.stateIn(
+        }.combine(message) { current, text -> current.copy(message = text) }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = BinUiState(),
@@ -107,9 +113,14 @@ class BinViewModel(
 
     fun restore(item: BinnedItem) {
         viewModelScope.launch {
-            when (item) {
-                is BinnedItem.Note -> repository.restore(item.id)
-                is BinnedItem.Move -> repository.restoreTransfer(item.id)
+            try {
+                when (item) {
+                    is BinnedItem.Note -> repository.restore(item.id)
+                    is BinnedItem.Move -> repository.restoreTransfer(item.id)
+                }
+                message.value = "Catatan dipulihkan"
+            } catch (error: IllegalArgumentException) {
+                message.value = error.message
             }
         }
     }

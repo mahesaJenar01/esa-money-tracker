@@ -7,6 +7,8 @@ import com.esa.moneytracker.data.model.Category
 import com.esa.moneytracker.data.model.Pocket
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.data.model.TransactionType
+import com.esa.moneytracker.data.model.ReturnKind
+import com.esa.moneytracker.data.model.parseTags
 import java.time.LocalDateTime
 
 data class EditUiState(
@@ -25,6 +27,12 @@ data class EditUiState(
     /** Raw digits only — formatting to rupiah happens at the edges. */
     val amountDigits: String = "",
     val description: String = "",
+    val tagsText: String = "",
+    val knownTags: List<String> = emptyList(),
+    val categoryOptions: List<Category> = Category.entries,
+    val returnKind: ReturnKind? = null,
+    val relatedReturns: List<Transaction> = emptyList(),
+    val saveMessage: String? = null,
 
     /**
      * When the money moved, as this page currently has it.
@@ -90,7 +98,9 @@ data class EditUiState(
         get() {
             val source = original ?: return false
             return type != source.type ||
-                category != source.category ||
+                category?.id != source.categoryId ||
+                parseTags(tagsText) != source.tags ||
+                returnKind != source.returnKind ||
                 pocket != source.pocket ||
                 bankId.takeIf { pocket == Pocket.ONLINE } != source.bankId ||
                 amount != source.amount ||
@@ -102,7 +112,9 @@ data class EditUiState(
         get() = !saving && hasChanges && amountError == null && descriptionError == null &&
             bankError == null && category != null
 
-    val categories: List<Category> get() = Category.of(type)
+    val categories: List<Category> get() = categoryOptions.filter {
+        it.type == type && (!it.archived || it.id == category?.id)
+    }
 
     val suggestedBankColor: BankColor get() = BankColor.suggestFor(banks.map { it.color })
 }

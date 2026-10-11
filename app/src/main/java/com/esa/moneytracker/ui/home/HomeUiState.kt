@@ -56,6 +56,7 @@ data class CategorySlice(
 
 data class HomeUiState(
     val loading: Boolean = true,
+    val message: String? = null,
     val today: LocalDate = LocalDate.now(),
     val period: AnalyticsPeriod = AnalyticsPeriod.WEEKLY,
     val availablePeriods: List<AnalyticsPeriod> = AnalyticsPeriod.entries.toList(),
@@ -72,6 +73,7 @@ data class HomeUiState(
 
     val periodIncome: Long = 0,
     val periodExpense: Long = 0,
+    val periodReturned: Long = 0,
     val periodCount: Int = 0,
     val breakdown: List<CategorySlice> = emptyList(),
     /** Smart summary for the selected analytics window, locally generated for now. */

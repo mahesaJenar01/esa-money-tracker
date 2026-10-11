@@ -35,6 +35,10 @@ data class EntryUiState(
     /** Raw digits only — formatting to rupiah happens at the edges. */
     val amountDigits: String = "",
     val description: String = "",
+    val tagsText: String = "",
+    val knownTags: List<String> = emptyList(),
+    val categoryOptions: List<Category> = Category.entries,
+    val saveMessage: String? = null,
 
     /**
      * When the money actually moved, or null for "right now".
@@ -103,7 +107,7 @@ data class EntryUiState(
             bankError == null && category != null
 
     val categories: List<Category>
-        get() = type?.let { Category.of(it) } ?: emptyList()
+        get() = type?.let { selected -> categoryOptions.filter { it.type == selected && !it.archived } } ?: emptyList()
 
     /** The staged pictures in the shape every thumbnail already draws. */
     val attachmentPreviews: List<Attachment> get() = attachments.map { it.asPreview() }

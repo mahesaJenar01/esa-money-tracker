@@ -112,11 +112,12 @@ data class SubscriptionEntity(
     val deletedAt: Long? = null,
 )
 
-fun SubscriptionEntity.toDomain(): Subscription = Subscription(
+fun SubscriptionEntity.toDomain(categories: List<com.esa.moneytracker.data.model.Category> = com.esa.moneytracker.data.model.Category.entries): Subscription = Subscription(
     id = id,
     name = name,
     amount = amount,
     categoryId = category,
+    categoryDefinition = categories.firstOrNull { it.id == category },
     pocket = Pocket.fromId(pocket),
     bankId = bank,
     cycle = BillingCycle.fromId(cycle),

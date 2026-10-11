@@ -148,7 +148,7 @@ fun AnalyticsCard(
                 modifier = Modifier.weight(1f),
             )
             FlowStat(
-                label = "Pengeluaran",
+                label = if (state.periodReturned > 0) "Pengeluaran bersih" else "Pengeluaran",
                 amount = state.periodExpense,
                 icon = Icons.Rounded.ArrowUpward,
                 tint = colors.expense,
@@ -180,10 +180,14 @@ fun AnalyticsCard(
             )
         }
 
+        if (state.periodReturned > 0) {
+            Spacer(Modifier.height(10.dp))
+            Text("Termasuk pengembalian " + CurrencyFormatter.rupiah(state.periodReturned) + " yang diterima pada periode ini.", style = MaterialTheme.typography.bodySmall)
+        }
         if (state.breakdown.isNotEmpty()) {
             Spacer(Modifier.height(18.dp))
             Text(
-                text = "Pengeluaran per kategori",
+                text = if (state.periodReturned > 0) "Pengeluaran bersih per kategori" else "Pengeluaran per kategori",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

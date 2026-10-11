@@ -10,6 +10,10 @@ import com.esa.moneytracker.data.model.Attachment
 import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.data.model.TransactionType
+import com.esa.moneytracker.data.model.earnedIncome
+import com.esa.moneytracker.data.model.expenseContribution
+import com.esa.moneytracker.data.model.normalizeTags
+import com.esa.moneytracker.data.model.transactionsForTag
 import com.esa.moneytracker.data.repository.TransactionRepository
 import com.esa.moneytracker.ui.home.DayGroup
 import com.esa.moneytracker.ui.home.historyDays
@@ -31,6 +35,10 @@ data class RecordsUiState(
     val days: List<DayGroup> = emptyList(),
     val income: Long = 0,
     val expense: Long = 0,
+    val returned: Long = 0,
+    val tags: List<String> = emptyList(),
+    val selectedTag: String? = null,
+    val message: String? = null,
     val count: Int = 0,
 
     /** How many notes are waiting in the bin, for the link at the top. */
@@ -50,8 +58,8 @@ data class RecordsUiState(
     val canGoNewer: Boolean = false,
 ) {
     val net: Long get() = income - expense
-    val title: String get() = week.relativeLabel(today)
-    val rangeLabel: String get() = week.rangeLabel
+    val title: String get() = selectedTag?.let { "Tag: " + it } ?: week.relativeLabel(today)
+    val rangeLabel: String get() = if (selectedTag == null) week.rangeLabel else "Semua tanggal"
     val isEmpty: Boolean get() = !loading && days.isEmpty()
 }
 
@@ -68,6 +76,8 @@ class RecordsViewModel(
 ) : ViewModel() {
 
     private val week = MutableStateFlow(WeekWindow.of(LocalDate.now(zone)))
+    private val tag = MutableStateFlow<String?>(null)
+    private val message = MutableStateFlow<String?>(null)
 
     val state: StateFlow<RecordsUiState> =
         combine(
@@ -80,8 +90,8 @@ class RecordsViewModel(
             repository.observeDeleted(),
             repository.observeBanks(),
             repository.observeBalanceChecks(),
-            week,
-        ) { (transactions, attachments), deleted, banks, checks, window ->
+            combine(week, tag, message) { window, selected, text -> Triple(window, selected, text) },
+        ) { (transactions, attachments), deleted, banks, checks, (window, selectedTag, text) ->
             buildState(
                 transactions = transactions,
                 attachments = attachments,
@@ -89,12 +99,17 @@ class RecordsViewModel(
                 binCount = deleted.size,
                 bankNames = banks.associate { it.id to it.name },
                 window = window,
+                selectedTag = selectedTag,
+                message = text,
             )
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = RecordsUiState(),
         )
+
+    fun selectTag(value: String?) { tag.value = value }
+    fun dismissMessage() { message.value = null }
 
     fun showOlderWeek() {
         if (state.value.canGoOlder) week.value = week.value.previous()
@@ -109,7 +124,9 @@ class RecordsViewModel(
     }
 
     fun restore(id: String) {
-        viewModelScope.launch { repository.restore(id) }
+        viewModelScope.launch {
+            try { repository.restore(id) } catch (error: IllegalArgumentException) { message.value = error.message }
+        }
     }
 
     /** Removes a mark. Any note it wrote to close a gap is left alone. */
@@ -124,10 +141,13 @@ class RecordsViewModel(
         binCount: Int,
         bankNames: Map<String, String>,
         window: WeekWindow,
+        selectedTag: String?,
+        message: String?,
     ): RecordsUiState {
         val today = LocalDate.now(zone)
-        val inWeek = transactions.filter { window.contains(it.dateIn(zone)) }
-        val checksInWeek = checks.filter { window.contains(it.dateIn(zone)) }
+        val inWeek = if (selectedTag == null) transactions.filter { window.contains(it.dateIn(zone)) }
+            else transactionsForTag(transactions, selectedTag)
+        val checksInWeek = if (selectedTag == null) checks.filter { window.contains(it.dateIn(zone)) } else emptyList()
 
         // A week holding nothing but a mark is still a week worth paging back
         // to, so the oldest thing on file is the older of the two.
@@ -141,9 +161,13 @@ class RecordsViewModel(
             today = today,
             week = window,
             days = historyDays(inWeek, checksInWeek, zone, today),
-            income = inWeek.filter { it.type == TransactionType.INCOME }.sumOf { it.amount },
-            expense = inWeek.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount },
+            income = inWeek.sumOf { it.earnedIncome },
+            expense = inWeek.sumOf { it.expenseContribution },
             count = inWeek.size,
+            returned = inWeek.filter { it.isReturn }.sumOf { it.amount },
+            tags = normalizeTags(transactions.flatMap { it.tags }).sortedBy { it.lowercase() },
+            selectedTag = selectedTag,
+            message = message,
             binCount = binCount,
             bankNames = bankNames,
             attachments = attachments,

@@ -1,5 +1,7 @@
 package com.esa.moneytracker.ui.records
 
+import androidx.compose.foundation.layout.Arrangement
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -33,6 +35,10 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -69,6 +75,8 @@ fun RecordsScreen(
     onOlderWeek: () -> Unit,
     onNewerWeek: () -> Unit,
     onEdit: (String) -> Unit,
+    onAddReturn: (String) -> Unit,
+    onManageCategories: () -> Unit,
     onDelete: (String) -> Unit,
     onRestore: (String) -> Unit,
     onDeleteCheck: (String) -> Unit,
@@ -76,6 +84,8 @@ fun RecordsScreen(
     onOpenAttachment: (String, Int) -> Unit,
     onOpenBin: () -> Unit,
     onCheckBalance: () -> Unit,
+    onSelectTag: (String?) -> Unit,
+    onDismissMessage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val zone = remember { ZoneId.systemDefault() }
@@ -85,7 +95,10 @@ fun RecordsScreen(
     var expandedId by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Stepping to another week makes the open row irrelevant.
-    LaunchedEffect(state.week) { expandedId = null }
+    LaunchedEffect(state.week, state.selectedTag) { expandedId = null }
+    LaunchedEffect(state.message) {
+        state.message?.let { snackbarHostState.showSnackbar(it); onDismissMessage() }
+    }
 
     Scaffold(
         modifier = modifier,
@@ -108,9 +121,24 @@ fun RecordsScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 32.dp),
             ) {
+                item("tags") {
+                    Column(Modifier.padding(horizontal = 16.dp)) {
+                        TextButton(onClick = onManageCategories) { Text("Kelola kategori") }
+                        if (state.tags.isNotEmpty() || state.selectedTag != null) {
+                            Text("Kelompokkan berdasarkan tag", style = MaterialTheme.typography.labelMedium)
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(selected = state.selectedTag == null, onClick = { onSelectTag(null) }, label = { Text("Semua") })
+                                state.tags.forEach { tag ->
+                                    FilterChip(selected = state.selectedTag?.equals(tag, ignoreCase = true) == true, onClick = { onSelectTag(tag) }, label = { Text(tag) })
+                                }
+                            }
+                            if (state.selectedTag != null) Text("Pengembalian terkait ikut dihitung meskipun tag pengembaliannya berbeda.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
                 item("week") {
                     Column(Modifier.padding(horizontal = 16.dp)) {
-                        WeekPager(
+                        if (state.selectedTag == null) WeekPager(
                             title = state.title,
                             rangeLabel = state.rangeLabel,
                             canGoOlder = state.canGoOlder,
@@ -118,6 +146,10 @@ fun RecordsScreen(
                             onOlder = onOlderWeek,
                             onNewer = onNewerWeek,
                         )
+                        if (state.selectedTag != null) {
+                            Text(state.title, style = MaterialTheme.typography.titleMedium)
+                            Text(state.rangeLabel, style = MaterialTheme.typography.bodySmall)
+                        }
                         Spacer(Modifier.height(12.dp))
                         WeekSummary(state)
                         Spacer(Modifier.height(10.dp))
@@ -148,6 +180,8 @@ fun RecordsScreen(
                                     val transaction = entry.transaction
                                     TransactionListItem(
                                         transaction = transaction,
+                                        onAddReturn = { onAddReturn(transaction.id) },
+                                        onOpenExpense = { transaction.returnOf?.let(onEdit) },
                                         zone = zone,
                                         bankLabel = state.bankNames[transaction.bankId],
                                         attachments = state.attachments[transaction.id]
@@ -203,7 +237,7 @@ fun RecordsScreen(
                             )
                             Spacer(Modifier.height(12.dp))
                             Text(
-                                text = "Tidak ada catatan pada minggu ini",
+                                text = if (state.selectedTag == null) "Tidak ada catatan pada minggu ini" else "Tidak ada catatan dengan tag ini",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
@@ -386,12 +420,13 @@ private fun WeekSummary(state: RecordsUiState) {
                 modifier = Modifier.weight(1f),
             )
             SummaryCell(
-                label = "Pengeluaran",
+                label = if (state.returned > 0) "Pengeluaran bersih" else "Pengeluaran",
                 value = CurrencyFormatter.rupiah(state.expense),
                 tint = colors.expense,
                 modifier = Modifier.weight(1f),
             )
         }
+        if (state.returned > 0) Text("Termasuk pengembalian " + CurrencyFormatter.rupiah(state.returned) + ".", style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(

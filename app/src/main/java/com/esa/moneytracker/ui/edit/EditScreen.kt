@@ -47,6 +47,10 @@ import com.esa.moneytracker.data.model.TransactionType
 import com.esa.moneytracker.ui.components.AmountField
 import com.esa.moneytracker.ui.components.AttachmentPicker
 import com.esa.moneytracker.ui.components.DescriptionField
+import com.esa.moneytracker.ui.components.TagsField
+import com.esa.moneytracker.data.model.ReturnKind
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.TextButton
 import com.esa.moneytracker.ui.components.FieldLabel
 import com.esa.moneytracker.ui.components.IconBadge
 import com.esa.moneytracker.ui.components.PocketPicker
@@ -76,11 +80,17 @@ fun EditScreen(
     state: EditUiState,
     onChooseType: (TransactionType) -> Unit,
     onChooseCategory: (Category) -> Unit,
+    onManageCategories: () -> Unit,
+    onChooseReturnKind: (ReturnKind) -> Unit,
+    onOpenExpense: (String) -> Unit,
+    onAddReturn: (String) -> Unit,
+    onEditLinkedReturn: (String) -> Unit,
     onChoosePocket: (Pocket) -> Unit,
     onChooseBank: (String) -> Unit,
     onAddBank: (String, BankColor, Long, BankFunding) -> Unit,
     onAmountChanged: (String) -> Unit,
     onDescriptionChanged: (String) -> Unit,
+    onTagsChanged: (String) -> Unit,
     onOccurredAtChanged: (LocalDateTime) -> Unit,
     onResetOccurredAt: () -> Unit,
     onPickAttachment: (Uri) -> Unit,
@@ -118,11 +128,17 @@ fun EditScreen(
                     state = state,
                     onChooseType = onChooseType,
                     onChooseCategory = onChooseCategory,
+                    onManageCategories = onManageCategories,
+                    onChooseReturnKind = onChooseReturnKind,
+                    onOpenExpense = onOpenExpense,
+                    onAddReturn = onAddReturn,
+                    onEditLinkedReturn = onEditLinkedReturn,
                     onChoosePocket = onChoosePocket,
                     onChooseBank = onChooseBank,
                     onAddBank = onAddBank,
                     onAmountChanged = onAmountChanged,
                     onDescriptionChanged = onDescriptionChanged,
+                    onTagsChanged = onTagsChanged,
                     onOccurredAtChanged = onOccurredAtChanged,
                     onResetOccurredAt = onResetOccurredAt,
                     onPickAttachment = onPickAttachment,
@@ -180,11 +196,17 @@ private fun EditForm(
     state: EditUiState,
     onChooseType: (TransactionType) -> Unit,
     onChooseCategory: (Category) -> Unit,
+    onManageCategories: () -> Unit,
+    onChooseReturnKind: (ReturnKind) -> Unit,
+    onOpenExpense: (String) -> Unit,
+    onAddReturn: (String) -> Unit,
+    onEditLinkedReturn: (String) -> Unit,
     onChoosePocket: (Pocket) -> Unit,
     onChooseBank: (String) -> Unit,
     onAddBank: (String, BankColor, Long, BankFunding) -> Unit,
     onAmountChanged: (String) -> Unit,
     onDescriptionChanged: (String) -> Unit,
+    onTagsChanged: (String) -> Unit,
     onOccurredAtChanged: (LocalDateTime) -> Unit,
     onResetOccurredAt: () -> Unit,
     onPickAttachment: (Uri) -> Unit,
@@ -253,54 +275,77 @@ private fun EditForm(
             Spacer(Modifier.height(20.dp))
         }
 
-        FieldLabel("Jenis")
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TypeChip(
-                type = TransactionType.INCOME,
-                selected = state.type == TransactionType.INCOME,
-                onClick = { onChooseType(TransactionType.INCOME) },
-                modifier = Modifier.weight(1f),
-            )
-            TypeChip(
-                type = TransactionType.EXPENSE,
-                selected = state.type == TransactionType.EXPENSE,
-                onClick = { onChooseType(TransactionType.EXPENSE) },
-                modifier = Modifier.weight(1f),
-            )
-        }
-
-        Spacer(Modifier.height(18.dp))
-
-        FieldLabel("Kategori")
-        Spacer(Modifier.height(8.dp))
-        state.categories.chunked(2).forEach { pair ->
-            Row(
-                modifier = Modifier.padding(bottom = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                pair.forEach { category ->
-                    CategoryChip(
-                        category = category,
-                        selected = state.category == category,
-                        onClick = { onChooseCategory(category) },
-                        modifier = Modifier.weight(1f),
-                    )
+        if (state.original?.isReturn == true) {
+            Text("Pengembalian untuk: " + state.original.originalExpenseDescription.orEmpty())
+            TextButton(onClick = { state.original.returnOf?.let(onOpenExpense) }) { Text("Lihat pengeluaran asal") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ReturnKind.entries.forEach { kind ->
+                    FilterChip(selected = state.returnKind == kind, onClick = { onChooseReturnKind(kind) }, label = { Text(kind.label) })
                 }
-                // Keeps a lone chip on the last row half-width like the others.
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+            Text("Kategori mengikuti pengeluaran asal. Pengembalian mengurangi pengeluaran bersih, bukan menambah pemasukan.", style = MaterialTheme.typography.bodySmall)
+        } else {
+            FieldLabel("Jenis")
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TypeChip(
+                    type = TransactionType.INCOME,
+                    selected = state.type == TransactionType.INCOME,
+                    onClick = { onChooseType(TransactionType.INCOME) },
+                    modifier = Modifier.weight(1f),
+                )
+                TypeChip(
+                    type = TransactionType.EXPENSE,
+                    selected = state.type == TransactionType.EXPENSE,
+                    onClick = { onChooseType(TransactionType.EXPENSE) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
+
+            FieldLabel("Kategori")
+            Spacer(Modifier.height(8.dp))
+            state.categories.chunked(2).forEach { pair ->
+                Row(
+                    modifier = Modifier.padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    pair.forEach { category ->
+                        CategoryChip(
+                            category = category,
+                            selected = state.category == category,
+                            onClick = { onChooseCategory(category) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    // Keeps a lone chip on the last row half-width like the others.
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+            if (state.showErrors && state.category == null) {
+                Text(
+                    text = "Pilih satu kategori",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            TextButton(onClick = onManageCategories) { Text("Tambah / kelola kategori") }
+        }
+        if (state.original?.type == TransactionType.EXPENSE) {
+            Text("Biaya awal " + CurrencyFormatter.rupiah(state.original.amount) +
+                " • Sudah kembali " + CurrencyFormatter.rupiah(state.original.returnedAmount) +
+                " • Biaya bersih " + CurrencyFormatter.rupiah(state.original.netCost), style = MaterialTheme.typography.bodySmall)
+            if (state.original.canReceiveReturn) TextButton(onClick = { onAddReturn(state.original.id) }) { Text("Catat refund / reimbursemen") }
+            state.relatedReturns.forEach { linked ->
+                TextButton(onClick = { onEditLinkedReturn(linked.id) }) {
+                    Text(linked.typeLabel + " • " + CurrencyFormatter.rupiah(linked.amount) + " • " + linked.description)
+                }
             }
         }
-        if (state.showErrors && state.category == null) {
-            Text(
-                text = "Pilih satu kategori",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-
-        Spacer(Modifier.height(8.dp))
-
         FieldLabel("Nominal")
         Spacer(Modifier.height(8.dp))
         AmountField(
@@ -365,6 +410,9 @@ private fun EditForm(
 
         Spacer(Modifier.height(18.dp))
 
+        TagsField(state.tagsText, onTagsChanged, state.knownTags)
+        Spacer(Modifier.height(18.dp))
+
         FieldLabel("Lampiran")
         Spacer(Modifier.height(8.dp))
         AttachmentPicker(
@@ -387,6 +435,7 @@ private fun EditForm(
 
         Spacer(Modifier.height(24.dp))
 
+        if (state.saveMessage != null) Text(state.saveMessage, color = MaterialTheme.colorScheme.error)
         SubmitButton(
             label = if (state.hasChanges) {
                 "Simpan " + CurrencyFormatter.rupiah(state.amount)

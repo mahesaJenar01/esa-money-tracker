@@ -15,6 +15,9 @@ import com.esa.moneytracker.data.model.Category
 import com.esa.moneytracker.data.model.onlinePocketOf
 import com.esa.moneytracker.data.model.Pocket
 import com.esa.moneytracker.data.model.TransactionType
+import com.esa.moneytracker.data.model.ReturnKind
+import com.esa.moneytracker.data.model.parseTags
+import com.esa.moneytracker.data.model.normalizeTags
 import com.esa.moneytracker.data.repository.TransactionRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -50,7 +53,9 @@ class EditViewModel(
 
     val state: StateFlow<EditUiState> =
         combine(
-            form,
+            combine(form, repository.observeCategories()) { current, categories ->
+                current.copy(categoryOptions = categories, category = categories.firstOrNull { it.id == current.category?.id })
+            },
             repository.observeBanks(),
             repository.observeAll(),
             repository.observeTransfers(),
@@ -59,8 +64,14 @@ class EditViewModel(
             // Balances, not bare names: the picker is also where a bank gets
             // created, and that dialog has to say what the other banks hold.
             val open = onlinePocketOf(banks, transactions, transfers).banks
+            val liveSource = transactions.firstOrNull { it.id == transactionId }
             current.copy(
                 banks = open,
+                knownTags = normalizeTags(transactions.flatMap { it.tags }),
+                relatedReturns = transactions.filter { it.returnOf == transactionId },
+                original = current.original?.let { liveSource ?: it },
+                category = if (current.original?.isReturn == true) liveSource?.category ?: current.category else current.category,
+                missing = current.original != null && liveSource == null,
                 bankId = current.bankId?.takeIf { id -> open.any { it.id == id } }
                     ?: open.firstOrNull()?.id,
                 // Read rather than held: a lampiran added here is already in the
@@ -92,6 +103,8 @@ class EditViewModel(
                     bankId = transaction.bankId,
                     amountDigits = transaction.amount.toString(),
                     description = transaction.description,
+                    tagsText = transaction.tags.joinToString(", "),
+                    returnKind = transaction.returnKind,
                     occurredAt = occurred,
                     originalOccurredAt = occurred,
                 )
@@ -104,7 +117,7 @@ class EditViewModel(
      * page falls back to no selection and asks for one again.
      */
     fun chooseType(type: TransactionType) = form.update {
-        if (it.type == type) {
+        if (it.original?.isReturn == true || it.type == type) {
             it
         } else {
             it.copy(type = type, category = null)
@@ -124,6 +137,10 @@ class EditViewModel(
     }
 
     fun onDescriptionChanged(value: String) = form.update { it.copy(description = value) }
+
+    fun onTagsChanged(value: String) = form.update { it.copy(tagsText = value) }
+
+    fun chooseReturnKind(kind: ReturnKind) = form.update { it.copy(returnKind = kind) }
 
     fun onOccurredAtChanged(value: LocalDateTime) = form.update { it.copy(occurredAt = value) }
 
@@ -190,6 +207,7 @@ class EditViewModel(
     }
 
     fun submit() {
+        if (form.value.saving || form.value.saved) return
         val current = state.value
         val original = current.original ?: return
         val category = current.category
@@ -203,20 +221,26 @@ class EditViewModel(
 
         form.update { it.copy(saving = true, showErrors = true) }
         viewModelScope.launch {
-            repository.update(
-                original = original,
-                type = current.type,
-                pocket = current.pocket,
-                category = category,
-                bankId = current.bankId,
-                amount = current.amount,
-                description = current.description,
-                // Only what the user actually touched. Handing back the same
-                // instant is what keeps the note where it is in the history.
-                occurredAt = current.occurredAt?.atZone(zone)?.toInstant()
-                    ?: original.occurredAt,
-            )
-            form.update { it.copy(saving = false, saved = true) }
+            try {
+                repository.update(
+                    original = original,
+                    type = current.type,
+                    pocket = current.pocket,
+                    category = category,
+                    bankId = current.bankId,
+                    amount = current.amount,
+                    description = current.description,
+                    tags = parseTags(current.tagsText),
+                    returnKind = current.returnKind,
+                    // Only what the user actually touched. Handing back the same
+                    // instant is what keeps the note where it is in the history.
+                    occurredAt = current.occurredAt?.atZone(zone)?.toInstant()
+                        ?: original.occurredAt,
+                )
+                form.update { it.copy(saving = false, saved = true) }
+            } catch (error: IllegalArgumentException) {
+                form.update { it.copy(saving = false, saveMessage = error.message) }
+            }
         }
     }
 

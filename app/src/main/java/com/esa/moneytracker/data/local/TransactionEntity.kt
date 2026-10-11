@@ -8,6 +8,9 @@ import com.esa.moneytracker.data.model.Category
 import com.esa.moneytracker.data.model.Pocket
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.data.model.TransactionType
+import com.esa.moneytracker.data.model.ReturnKind
+import com.esa.moneytracker.data.model.normalizeTags
+import kotlinx.serialization.json.Json
 import java.time.Instant
 
 /**
@@ -27,6 +30,7 @@ import java.time.Instant
         Index("bank"),
         Index("deleted_at"),
         Index("subscription"),
+        Index("return_of"),
     ],
 )
 data class TransactionEntity(
@@ -102,6 +106,12 @@ data class TransactionEntity(
      */
     @ColumnInfo(name = "deleted_at")
     val deletedAt: Long? = null,
+    @ColumnInfo(name = "tags", defaultValue = "'[]'")
+    val tags: String = "[]",
+    @ColumnInfo(name = "return_of")
+    val returnOf: String? = null,
+    @ColumnInfo(name = "return_kind")
+    val returnKind: String? = null,
 ) {
     companion object {
         /** How long a deleted record stays recoverable. */
@@ -109,11 +119,11 @@ data class TransactionEntity(
     }
 }
 
-fun TransactionEntity.toDomain(): Transaction = Transaction(
+fun TransactionEntity.toDomain(categories: List<Category> = Category.entries): Transaction = Transaction(
     id = id,
     type = TransactionType.fromId(type),
     pocket = Pocket.fromId(pocket),
-    category = Category.fromId(category),
+    category = categories.firstOrNull { it.id == category },
     categoryId = category,
     bankId = bank,
     amount = amount,
@@ -123,6 +133,9 @@ fun TransactionEntity.toDomain(): Transaction = Transaction(
     createdAt = Instant.ofEpochMilli(createdAt),
     updatedAt = updatedAt?.let(Instant::ofEpochMilli),
     deletedAt = deletedAt?.let(Instant::ofEpochMilli),
+    tags = decodeTags(tags),
+    returnOf = returnOf,
+    returnKind = ReturnKind.fromId(returnKind),
 )
 
 fun Transaction.toEntity(): TransactionEntity =
@@ -139,4 +152,10 @@ fun Transaction.toEntity(): TransactionEntity =
         createdAt = createdAt.toEpochMilli(),
         updatedAt = updatedAt?.toEpochMilli(),
         deletedAt = deletedAt?.toEpochMilli(),
+        tags = Json.encodeToString(normalizeTags(tags)),
+        returnOf = returnOf,
+        returnKind = returnKind?.id,
     )
+
+fun decodeTags(json: String): List<String> =
+    runCatching { normalizeTags(Json.decodeFromString<List<String>>(json)) }.getOrDefault(emptyList())

@@ -25,7 +25,7 @@ fun iconFor(category: Category?): ImageVector = when (category) {
     Category.LANGGANAN -> Icons.Rounded.Subscriptions
     Category.KEBUTUHAN -> Icons.Rounded.Home
     Category.BELANJA -> Icons.Rounded.ShoppingBag
-    Category.LAINNYA, null -> Icons.Rounded.Category
+    else -> Icons.Rounded.Category
 }
 
 fun iconFor(pocket: Pocket): ImageVector = when (pocket) {

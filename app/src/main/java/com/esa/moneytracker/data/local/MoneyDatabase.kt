@@ -17,8 +17,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TransferEntity::class,
         AttachmentEntity::class,
         SubscriptionEntity::class,
+        CategoryEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class MoneyDatabase : RoomDatabase() {
@@ -36,6 +37,8 @@ abstract class MoneyDatabase : RoomDatabase() {
     abstract fun attachmentDao(): AttachmentDao
 
     abstract fun subscriptionDao(): SubscriptionDao
+
+    abstract fun categoryDao(): CategoryDao
 
     companion object {
         /**
@@ -360,6 +363,17 @@ abstract class MoneyDatabase : RoomDatabase() {
             }
         }
 
+        /** Existing category ids, amounts, and balances keep their values. */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `categories` (`id` TEXT NOT NULL, `label` TEXT NOT NULL, `type` TEXT NOT NULL, `archived` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))")
+                db.execSQL("ALTER TABLE `transactions` ADD COLUMN `tags` TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("ALTER TABLE `transactions` ADD COLUMN `return_of` TEXT")
+                db.execSQL("ALTER TABLE `transactions` ADD COLUMN `return_kind` TEXT")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_return_of` ON `transactions` (`return_of`)")
+            }
+        }
+
         @Volatile
         private var instance: MoneyDatabase? = null
 
@@ -378,6 +392,7 @@ abstract class MoneyDatabase : RoomDatabase() {
                         MIGRATION_5_6,
                         MIGRATION_6_7,
                         MIGRATION_7_8,
+                        MIGRATION_8_9,
                     )
                     .build()
                     .also { instance = it }

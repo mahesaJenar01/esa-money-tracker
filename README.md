@@ -35,9 +35,20 @@ rupiah.
   holds, next to what the app worked out, offers to write the gap into the
   history as an ordinary note, and leaves a line across Riwayat where it was
   done. See [Marking where the balances were checked](#marking-where-the-balances-were-checked).
-- **Analytics** — a period picker that currently offers **Mingguan** (weekly).
+- **Analytics** — a period picker offering **Mingguan** (weekly) and **Bulanan** (monthly).
   The card shows income, expense, the difference, and a per-category breakdown of
   spending in that window.
+- **Kategori pribadi & tag** — create income or expense categories through
+  **Kelola kategori** on Home, history, or a category picker. Rename or archive
+  a personal category without losing its old notes; archived categories remain
+  readable in history and existing subscription plans. Add comma-separated tags
+  to a note, then pick a tag in full history to see matching records across all
+  dates, with income and net-expense totals.
+- **Refund & reimbursemen** — open an expense and tap **Catat refund /
+  reimbursemen**. Record money only after receiving it, with its own amount,
+  receiving bank/cash pocket and date. Partial and multiple returns are allowed
+  up to the original expense's cost. The expense shows its original cost,
+  returned amount, and net cost; each return links back to it.
 - **Lampiran** — a note can carry pictures: a photo of the struk, a screenshot
   of a transfer receipt, or a PDF invoice, which is rendered to a picture per
   page when it is picked. The first one shows in the history row itself, so the
@@ -98,6 +109,35 @@ app/src/main/java/com/esa/moneytracker/
 └── util/              rupiah formatting, Indonesian dates, AnalyticsPeriod,
                        WeekWindow, Images
 ```
+
+## Categories, tags, and returned expenses
+
+Personal categories have stable ids and their own `categories` table. Built-in
+ids are unchanged. Renaming updates the displayed label everywhere; archiving
+removes the category from new selections while keeping old records and ongoing
+subscriptions intact. A tag is independent of a category: **Kerja** can group
+transport, meals, and freelance income. Tags are trimmed and deduplicated without
+case sensitivity. Tag groups include the linked returns of their tagged expenses,
+including expenses tagged after the return was recorded.
+
+A return is stored as an inflow with `return_of` and `return_kind`. It increases
+the receiving pocket's balance, contributes zero earned income, and reduces net
+expenses on its actual receipt date. A Rp300.000 purchase and Rp100.000 refund
+leave a Rp200.000 net cost. If the refund arrives next month, the original month
+still shows Rp300.000 out and the receiving month shows a Rp100.000 expense
+reduction. The original expense's lifetime net cost is visible separately.
+
+Returns follow their original expense's category when it is reclassified. Dates
+before the expense and totals above its cost are rejected, including on edit,
+restore, and backup import. Deleting an expense bins its live returns together;
+undo restores that group without reviving returns deleted separately beforehand.
+A restore that would over-refund a subsequently edited expense is refused with
+an explanation. Invalid return links in a backup roll the import back.
+
+Database version 9 adds organization fields without rewriting existing data.
+Backup format 7 carries personal category definitions, archive state, tags, and
+return links in both JSON and ZIP; CSV and spreadsheet exports include the tags
+and link fields too. Backups from earlier versions remain accepted.
 
 ## Banks
 

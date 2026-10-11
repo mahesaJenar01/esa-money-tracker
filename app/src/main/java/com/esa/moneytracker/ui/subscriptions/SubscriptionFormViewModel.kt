@@ -42,6 +42,7 @@ data class SubscriptionFormUiState(
     /** Raw digits only — formatting to rupiah happens at the edges. */
     val amountDigits: String = "",
     val category: Category = Category.LANGGANAN,
+    val categoryOptions: List<Category> = Category.entries,
     val pocket: Pocket = Pocket.ONLINE,
     val bankId: String? = null,
     val banks: List<BankBalance> = emptyList(),
@@ -66,7 +67,7 @@ data class SubscriptionFormUiState(
 
     val amount: Long get() = amountDigits.toLongOrNull() ?: 0L
 
-    val categories: List<Category> get() = Category.of(TransactionType.EXPENSE)
+    val categories: List<Category> get() = categoryOptions.filter { it.type == TransactionType.EXPENSE && (!it.archived || it.id == category.id) }
 
     /** So a bank added from here rarely repeats a colour already in use. */
     val suggestedBankColor: BankColor
@@ -194,10 +195,13 @@ class SubscriptionFormViewModel(
             repository.observeBanks(),
             repository.observeAll(),
             repository.observeTransfers(),
-        ) { current, banks, transactions, transfers ->
+            repository.observeCategories(),
+        ) { current, banks, transactions, transfers, categories ->
             val open = onlinePocketOf(banks, transactions, transfers).banks
             current.copy(
                 banks = open,
+                categoryOptions = categories,
+                category = categories.firstOrNull { it.id == current.category.id } ?: current.category,
                 // With exactly one bank there is nothing to decide, so the
                 // question answers itself rather than blocking the form.
                 bankId = current.bankId?.takeIf { id -> open.any { it.id == id } }

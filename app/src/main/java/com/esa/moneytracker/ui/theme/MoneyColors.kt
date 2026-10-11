@@ -47,7 +47,7 @@ data class MoneyColors(
         if (pocket == Pocket.ONLINE) pocketOnline else pocketCash
 
     fun forCategory(category: Category?): Color =
-        category?.let { categoryTint[it.id] } ?: muted
+        category?.let { categoryTint[it.id] ?: forType(it.type) } ?: muted
 
     fun forBank(color: BankColor): Color = bankTint[color.id] ?: pocketOnline
 

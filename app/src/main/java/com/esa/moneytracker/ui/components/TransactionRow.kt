@@ -97,7 +97,8 @@ fun TransactionRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = transaction.categoryLabel,
+                    text = if (transaction.isReturn) transaction.typeLabel + " • " + transaction.categoryLabel else transaction.categoryLabel,
+                    modifier = Modifier.weight(1f, fill = false),
                     style = MaterialTheme.typography.labelLarge,
                     color = if (dimmed) {
                         MaterialTheme.colorScheme.onSurfaceVariant
@@ -142,6 +143,12 @@ fun TransactionRow(
                 maxLines = if (expanded) Int.MAX_VALUE else 1,
                 overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
             )
+            if (transaction.tags.isNotEmpty()) {
+                Text(transaction.tags.joinToString("  ") { "#" + it },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = if (expanded) Int.MAX_VALUE else 1, overflow = TextOverflow.Ellipsis)
+            }
         }
 
         if (attachments.isNotEmpty()) {

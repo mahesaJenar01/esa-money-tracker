@@ -67,7 +67,7 @@ data class SubscriptionExportRecord(
             id = id,
             name = name,
             amount = amount,
-            category = Category.fromId(category)?.id ?: Category.LANGGANAN.id,
+            category = category.takeIf { it.isNotBlank() } ?: Category.LANGGANAN.id,
             pocket = Pocket.fromId(pocket).id,
             bank = bank.takeIf { it.isNotBlank() },
             cycle = BillingCycle.fromId(cycle).id,
@@ -93,12 +93,13 @@ data class SubscriptionExportRecord(
             zone: ZoneId,
             /** Bank id to name, so the file reads without the app. */
             bankNames: Map<String, String> = emptyMap(),
+            categories: List<Category> = Category.entries,
         ): SubscriptionExportRecord = SubscriptionExportRecord(
             id = entity.id,
             name = entity.name,
             amount = entity.amount,
             category = entity.category,
-            categoryLabel = Category.fromId(entity.category)?.label ?: entity.category,
+            categoryLabel = categories.firstOrNull { it.id == entity.category }?.label ?: entity.category,
             pocket = entity.pocket,
             pocketLabel = Pocket.fromId(entity.pocket).label,
             bank = entity.bank.orEmpty(),

@@ -13,6 +13,8 @@ import com.esa.moneytracker.data.model.OpeningBalances
 import com.esa.moneytracker.data.model.SubscriptionUsage
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.data.model.TransactionType
+import com.esa.moneytracker.data.model.earnedIncome
+import com.esa.moneytracker.data.model.expenseContribution
 import com.esa.moneytracker.data.model.Transfer
 import com.esa.moneytracker.data.model.cashBalanceOf
 import com.esa.moneytracker.data.model.onlinePocketOf
@@ -53,6 +55,7 @@ class HomeViewModel(
 ) : ViewModel() {
 
     private val selectedPeriod = MutableStateFlow(AnalyticsPeriod.WEEKLY)
+    private val message = MutableStateFlow<String?>(null)
 
     val state: StateFlow<HomeUiState> =
         combine(
@@ -75,11 +78,13 @@ class HomeViewModel(
             selectedPeriod,
         ) { inputs, opening, banks, checks, period ->
             buildState(inputs, opening, banks, checks, period)
-        }.stateIn(
+        }.combine(message) { current, text -> current.copy(message = text) }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = HomeUiState(),
         )
+
+    fun dismissMessage() { message.value = null }
 
     fun selectPeriod(period: AnalyticsPeriod) {
         selectedPeriod.value = period
@@ -91,7 +96,7 @@ class HomeViewModel(
     }
 
     fun restore(id: String) {
-        viewModelScope.launch { repository.restore(id) }
+        viewModelScope.launch { try { repository.restore(id) } catch (error: IllegalArgumentException) { message.value = error.message } }
     }
 
     /** Removes a mark. Any note it wrote to close a gap is left alone. */
@@ -117,26 +122,26 @@ class HomeViewModel(
         val cash = cashBalanceOf(opening.cash, transactions, transfers)
 
         val inPeriod = transactions.filter { period.contains(it.dateIn(zone), today) }
-        val periodIncome = inPeriod.filter { it.type == TransactionType.INCOME }.sumOf { it.amount }
-        val periodExpense = inPeriod.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
+        val periodIncome = inPeriod.sumOf { it.earnedIncome }
+        val periodExpense = inPeriod.sumOf { it.expenseContribution }
         val checksInPeriod = checks.filter { period.contains(it.dateIn(zone), today) }
 
         // The breakdown answers "where did my money go this week", so it only
         // covers expenses; income has just two categories and its own total.
         val expenseByCategory = inPeriod
-            .filter { it.type == TransactionType.EXPENSE }
-            .groupBy { it.category }
-            .map { (category, items) ->
-                Triple(category, items.first().categoryLabel, items.sumOf { it.amount })
+            .filter { it.type == TransactionType.EXPENSE || it.isReturn }
+            .groupBy { it.categoryId }
+            .map { (_, items) ->
+                Triple(items.first().category, items.first().categoryLabel, items.sumOf { it.expenseContribution })
             }
             .sortedByDescending { it.third }
-        val largest = expenseByCategory.firstOrNull()?.third ?: 0L
+        val largest = expenseByCategory.maxOfOrNull { kotlin.math.abs(it.third) } ?: 0L
         val breakdown = expenseByCategory.map { (category, label, amount) ->
             CategorySlice(
                 category = category,
                 label = label,
                 amount = amount,
-                share = if (largest == 0L) 0f else amount.toFloat() / largest.toFloat(),
+                share = if (largest == 0L) 0f else kotlin.math.abs(amount).toFloat() / largest.toFloat(),
             )
         }
 
@@ -158,6 +163,7 @@ class HomeViewModel(
             attachments = attachments,
             periodIncome = periodIncome,
             periodExpense = periodExpense,
+            periodReturned = inPeriod.filter { it.isReturn }.sumOf { it.amount },
             periodCount = inPeriod.size,
             breakdown = breakdown,
             financialInsight = insightProvider.summarize(inPeriod, checksInPeriod),

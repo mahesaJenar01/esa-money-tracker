@@ -23,6 +23,8 @@ import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import com.esa.moneytracker.util.CurrencyFormatter
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +58,8 @@ fun TransactionListItem(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    onAddReturn: (() -> Unit)? = null,
+    onOpenExpense: (() -> Unit)? = null,
     bankLabel: String? = null,
     attachments: List<Attachment> = emptyList(),
     /** Opens the full-screen viewer at the picture that was tapped. */
@@ -98,6 +102,12 @@ fun TransactionListItem(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (transaction.isReturn && onOpenExpense != null) {
+                    TextButton(onClick = onOpenExpense) { Text("Lihat pengeluaran asal") }
+                }
+                if (transaction.canReceiveReturn && onAddReturn != null) {
+                    TextButton(onClick = onAddReturn) { Text("Catat refund / reimbursemen") }
+                }
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     RowAction(
@@ -128,6 +138,11 @@ fun TransactionListItem(
  * has something to say on all three counts.
  */
 fun transactionNotes(transaction: Transaction, zone: ZoneId): List<String> = buildList {
+    if (transaction.isReturn) add(transaction.typeLabel + " untuk: " + (transaction.originalExpenseDescription ?: "pengeluaran asal"))
+    if (transaction.returnedAmount > 0) {
+        add("Biaya awal " + CurrencyFormatter.rupiah(transaction.amount) + " • Kembali " + CurrencyFormatter.rupiah(transaction.returnedAmount) + " • Bersih " + CurrencyFormatter.rupiah(transaction.netCost))
+        add("Menghapus pengeluaran ini juga memindahkan pengembaliannya ke catatan terhapus.")
+    }
     val created = transaction.createdDateTimeIn(zone)
     add("Dibuat " + IndonesianDates.dayAndDate(created.toLocalDate()) + " • " + stamp(created))
 

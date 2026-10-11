@@ -44,12 +44,24 @@ data class Transaction(
     val updatedAt: Instant? = null,
     /** Non-null once the record is in the bin; it leaves the bin after 30 days. */
     val deletedAt: Instant? = null,
+    val tags: List<String> = emptyList(),
+    /** A received return is an inflow for balances, but is never earned income. */
+    val returnOf: String? = null,
+    val returnKind: ReturnKind? = null,
+    /** Derived from live linked records, not stored. */
+    val returnedAmount: Long = 0L,
+    val originalExpenseDescription: String? = null,
 ) {
     val categoryLabel: String get() = category?.label ?: categoryId
 
     /** Positive for income, negative for expense — handy for running balances. */
     val signedAmount: Long
         get() = if (type == TransactionType.INCOME) amount else -amount
+
+    val isReturn: Boolean get() = returnOf != null
+    val typeLabel: String get() = if (isReturn) returnKind?.label ?: "Pengembalian" else type.label
+    val netCost: Long get() = amount - returnedAmount
+    val canReceiveReturn: Boolean get() = type == TransactionType.EXPENSE && netCost > 0L && deletedAt == null
 
     /** True once the note has been rewritten at least once. */
     val edited: Boolean get() = updatedAt != null

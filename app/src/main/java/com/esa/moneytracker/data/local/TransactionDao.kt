@@ -60,6 +60,9 @@ interface TransactionDao {
     )
     suspend fun getAllOnce(): List<TransactionEntity>
 
+    @Query("SELECT * FROM transactions ORDER BY occurred_at ASC, created_at ASC")
+    suspend fun getIncludingDeleted(): List<TransactionEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(transaction: TransactionEntity)
 
@@ -89,12 +92,18 @@ interface TransactionDao {
     suspend fun allIds(): List<String>
 
     /** Moves a record to the bin; nothing is lost and its position is kept. */
-    @Query("UPDATE transactions SET deleted_at = :deletedAt WHERE id = :id")
+    @Query("UPDATE transactions SET deleted_at = :deletedAt WHERE id = :id AND deleted_at IS NULL")
     suspend fun softDelete(id: String, deletedAt: Long)
 
     /** Puts a binned record back exactly where it was. */
     @Query("UPDATE transactions SET deleted_at = NULL WHERE id = :id")
     suspend fun restore(id: String)
+
+    @Query("UPDATE transactions SET deleted_at = :deletedAt WHERE return_of = :id AND deleted_at IS NULL")
+    suspend fun deleteReturnsOf(id: String, deletedAt: Long)
+
+    @Query("UPDATE transactions SET deleted_at = NULL WHERE return_of = :id AND deleted_at = :deletedAt")
+    suspend fun restoreReturnsOf(id: String, deletedAt: Long)
 
     /**
      * Hands every note recorded against one bank to another one.

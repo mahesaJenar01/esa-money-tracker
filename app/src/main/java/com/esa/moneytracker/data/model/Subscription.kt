@@ -81,8 +81,9 @@ data class Subscription(
     val updatedAt: Instant? = null,
     /** Non-null once the plan is deleted; the notes it wrote are left alone. */
     val deletedAt: Instant? = null,
+    val categoryDefinition: Category? = null,
 ) {
-    val category: Category? get() = Category.fromId(categoryId)
+    val category: Category? get() = categoryDefinition ?: Category.fromId(categoryId)
 
     val categoryLabel: String get() = category?.label ?: categoryId
 

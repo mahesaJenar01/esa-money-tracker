@@ -30,7 +30,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,7 +39,6 @@ import com.esa.moneytracker.ui.components.TransactionRow
 import com.esa.moneytracker.ui.components.TransferRow
 import com.esa.moneytracker.ui.theme.MoneyTheme
 import com.esa.moneytracker.util.IndonesianDates
-import kotlinx.coroutines.launch
 import java.time.ZoneId
 
 /**
@@ -54,11 +52,14 @@ fun BinScreen(
     state: BinUiState,
     onBack: () -> Unit,
     onRestore: (BinnedItem) -> Unit,
+    onDismissMessage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val zone = remember { ZoneId.systemDefault() }
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
+    androidx.compose.runtime.LaunchedEffect(state.message) {
+        state.message?.let { snackbarHostState.showSnackbar(it); onDismissMessage() }
+    }
 
     Scaffold(
         modifier = modifier,
@@ -109,12 +110,7 @@ fun BinScreen(
                         zone = zone,
                         onRestore = {
                             onRestore(item)
-                            scope.launch {
-                                snackbarHostState.showSnackbar(
-                                    message = "Catatan dipulihkan",
-                                    withDismissAction = true,
-                                )
-                            }
+
                         },
                     )
                 }

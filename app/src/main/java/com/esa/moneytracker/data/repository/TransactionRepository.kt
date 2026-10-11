@@ -8,6 +8,7 @@ import com.esa.moneytracker.data.export.BackupArchive
 import com.esa.moneytracker.data.export.BackupDocument
 import com.esa.moneytracker.data.export.BalanceCheckExportRecord
 import com.esa.moneytracker.data.export.BankExportRecord
+import com.esa.moneytracker.data.export.CategoryExportRecord
 import com.esa.moneytracker.data.export.ImportResult
 import com.esa.moneytracker.data.export.SubscriptionExportRecord
 import com.esa.moneytracker.data.export.TransactionExportRecord
@@ -56,6 +57,15 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
 import kotlin.math.abs
+import androidx.room.withTransaction
+import com.esa.moneytracker.data.local.CategoryDao
+import com.esa.moneytracker.data.local.CategoryEntity
+import com.esa.moneytracker.data.local.MoneyDatabase
+import com.esa.moneytracker.data.model.ReturnKind
+import com.esa.moneytracker.data.model.normalizeTags
+import com.esa.moneytracker.data.model.resolveExpenseReturns
+import com.esa.moneytracker.data.model.returnValidationError
+import com.esa.moneytracker.data.model.validateExpenseReturnGraph
 
 /** A bank as the first-run screen collects it, before it has an id. */
 data class NewBank(
@@ -101,17 +111,56 @@ class TransactionRepository(
     private val subscriptionDao: SubscriptionDao,
     /** The files behind the lampiran; the database only ever holds their names. */
     private val attachments: AttachmentStore,
+    private val categoryDao: CategoryDao,
+    private val database: MoneyDatabase,
 ) {
 
     /** Holds the subscription catch-up to one run at a time. See [runDueSubscriptions]. */
     private val subscriptionRuns = Mutex()
 
     fun observeAll(): Flow<List<Transaction>> =
-        dao.observeAll().map { rows -> rows.map { it.toDomain() } }
+        combine(dao.observeAll(), observeCategories()) { rows, categories ->
+            resolveExpenseReturns(rows.map { it.toDomain(categories) })
+        }
 
     /** The bin: deleted records still inside their 30-day retention window. */
     fun observeDeleted(): Flow<List<Transaction>> =
-        dao.observeDeleted().map { rows -> rows.map { it.toDomain() } }
+        combine(dao.observeDeleted(), dao.observeAll(), observeCategories()) { deleted, live, categories ->
+            val resolved = resolveExpenseReturns((deleted + live).map { it.toDomain(categories) })
+            resolved.filter { it.deletedAt != null }
+        }
+
+    fun observeCategories(): Flow<List<Category>> = categoryDao.observeAll().map { rows ->
+        Category.entries + rows.map { it.toDomain() }
+    }
+
+    private suspend fun categoriesOnce(): List<Category> = Category.entries + categoryDao.getAll().map { it.toDomain() }
+
+    private suspend fun requireActiveBank(pocket: Pocket, bankId: String?) {
+        if (pocket != Pocket.ONLINE) return
+        val bank = bankId?.let { bankDao.findById(it) }
+        require(bank != null && bank.archivedAt == null) { "Pilih bank yang masih aktif." }
+    }
+
+    suspend fun saveCategory(label: String, type: TransactionType, id: String? = null): Category = database.withTransaction {
+        val name = label.trim().replace(Regex("\\s+"), " ")
+        require(name.isNotBlank() && name.length <= 50) { "Isi nama kategori, maksimal 50 karakter." }
+        val all = categoriesOnce()
+        val existing = id?.let { value -> all.firstOrNull { it.id == value } }
+        require(id == null || existing?.custom == true) { "Kategori bawaan tidak bisa diubah." }
+        require(existing == null || existing.type == type) { "Jenis kategori tidak bisa diubah." }
+        require(all.none { it.id != id && it.type == type && it.label.equals(name, ignoreCase = true) }) {
+            "Nama kategori sudah digunakan untuk jenis ini."
+        }
+        val category = Category(id ?: "custom_" + UUID.randomUUID(), name, type, existing?.archived ?: false)
+        categoryDao.upsert(CategoryEntity(category.id, name, type.id, category.archived))
+        category
+    }
+
+    suspend fun archiveCategory(id: String, archived: Boolean) = database.withTransaction {
+        val row = categoryDao.getAll().firstOrNull { it.id == id } ?: return@withTransaction
+        categoryDao.upsert(row.copy(archived = archived))
+    }
 
     /**
      * Every bank, closed ones included.
@@ -217,7 +266,11 @@ class TransactionRepository(
         )
     }
 
-    suspend fun find(id: String): Transaction? = dao.findById(id)?.toDomain()
+    suspend fun find(id: String): Transaction? = database.withTransaction {
+        val categories = categoriesOnce()
+        resolveExpenseReturns(dao.getIncludingDeleted().map { it.toDomain(categories) })
+            .firstOrNull { it.id == id }
+    }
 
     suspend fun findBank(id: String): Bank? = bankDao.findById(id)?.toDomain()
 
@@ -232,7 +285,12 @@ class TransactionRepository(
         occurredAt: Instant? = null,
         /** Set only by the subscription runner; a typed note never carries one. */
         subscriptionId: String? = null,
-    ): Transaction {
+        tags: List<String> = emptyList(),
+    ): Transaction = database.withTransaction {
+        require(amount > 0 && description.isNotBlank()) { "Isi nominal dan keterangan." }
+        val resolved = categoriesOnce().firstOrNull { it.id == category.id }
+        require(resolved != null && resolved.type == type && !resolved.archived) { "Pilih kategori aktif sesuai jenis transaksi." }
+        requireActiveBank(pocket, bankId)
         // One Instant for both stamps when the time was not chosen, so
         // Transaction.timeAdjusted is an exact comparison rather than a guess
         // about how long the form took to submit.
@@ -241,17 +299,48 @@ class TransactionRepository(
             id = UUID.randomUUID().toString(),
             type = type,
             pocket = pocket,
-            category = category,
-            categoryId = category.id,
+            category = resolved,
+            categoryId = resolved.id,
             bankId = bankId.takeIf { pocket == Pocket.ONLINE },
             amount = amount,
             description = description.trim(),
             subscriptionId = subscriptionId,
+            tags = normalizeTags(tags),
             occurredAt = occurredAt ?: now,
             createdAt = now,
         )
         dao.upsert(transaction.toEntity())
-        return transaction
+        transaction
+    }
+
+    suspend fun addReturn(
+        expenseId: String,
+        kind: ReturnKind,
+        pocket: Pocket,
+        bankId: String?,
+        amount: Long,
+        description: String,
+        occurredAt: Instant? = null,
+        tags: List<String> = emptyList(),
+    ): Transaction = database.withTransaction {
+        val categories = categoriesOnce()
+        val live = dao.getAllOnce().map { it.toDomain(categories) }
+        val expense = live.firstOrNull { it.id == expenseId }
+        val now = Instant.now()
+        val at = occurredAt ?: now
+        val error = returnValidationError(expense, live, amount, at)
+        require(error == null) { error.orEmpty() }
+        require(description.isNotBlank()) { "Keterangan wajib diisi." }
+        requireActiveBank(pocket, bankId)
+        val transaction = Transaction(
+            id = UUID.randomUUID().toString(), type = TransactionType.INCOME,
+            pocket = pocket, category = expense!!.category, categoryId = expense.categoryId,
+            bankId = bankId.takeIf { pocket == Pocket.ONLINE }, amount = amount,
+            description = description.trim(), tags = normalizeTags(tags),
+            returnOf = expenseId, returnKind = kind, occurredAt = at, createdAt = now,
+        )
+        dao.upsert(transaction.toEntity())
+        transaction
     }
 
     /**
@@ -273,28 +362,72 @@ class TransactionRepository(
         description: String,
         occurredAt: Instant = original.occurredAt,
         now: Instant = Instant.now(),
-    ): Transaction {
-        val updated = original.copy(
+        tags: List<String> = original.tags,
+        returnKind: ReturnKind? = original.returnKind,
+    ): Transaction = database.withTransaction {
+        val categories = categoriesOnce()
+        val live = dao.getAllOnce().map { it.toDomain(categories) }
+        val source = live.firstOrNull { it.id == original.id }
+        require(source != null) { "Catatan sudah dihapus." }
+        require(amount > 0 && description.isNotBlank()) { "Isi nominal dan keterangan." }
+        requireActiveBank(pocket, bankId)
+        if (source.isReturn) {
+            require(type == TransactionType.INCOME && returnKind != null) { "Pengembalian tetap ditautkan ke pengeluaran asal." }
+            val expense = live.firstOrNull { it.id == source.returnOf }
+            val error = returnValidationError(expense, live, amount, occurredAt, source.id)
+            require(error == null) { error.orEmpty() }
+        } else {
+            val linked = live.filter { it.returnOf == source.id }
+            require(linked.isEmpty() || (type == TransactionType.EXPENSE && amount >= linked.sumOf { it.amount })) {
+                "Pengeluaran ini sudah memiliki pengembalian; nominal tidak boleh lebih kecil dari total yang dikembalikan."
+            }
+            require(linked.none { it.occurredAt.isBefore(occurredAt) }) { "Tanggal pengeluaran tidak boleh setelah pengembaliannya." }
+            require(category.type == type) { "Pilih kategori sesuai jenis transaksi." }
+            val definition = categories.firstOrNull { it.id == category.id }
+            require(definition != null && (!definition.archived || definition.id == source.categoryId)) { "Pilih kategori aktif." }
+        }
+        val resolvedCategory = if (source.isReturn) live.firstOrNull { it.id == source.returnOf }?.category else category
+        val updated = source.copy(
             type = type,
             pocket = pocket,
-            category = category,
-            categoryId = category.id,
+            category = resolvedCategory,
+            categoryId = resolvedCategory?.id ?: source.categoryId,
             bankId = bankId.takeIf { pocket == Pocket.ONLINE },
             amount = amount,
             description = description.trim(),
             occurredAt = occurredAt,
             updatedAt = now,
+            tags = normalizeTags(tags),
+            returnKind = returnKind.takeIf { source.isReturn },
         )
         dao.upsert(updated.toEntity())
-        return updated
+        updated
     }
 
     /** Moves a record to the bin. It keeps its id, dates and ordering. */
-    suspend fun delete(id: String, now: Instant = Instant.now()) =
+    suspend fun delete(id: String, now: Instant = Instant.now()) = database.withTransaction {
+        dao.deleteReturnsOf(id, now.toEpochMilli())
         dao.softDelete(id, now.toEpochMilli())
+    }
 
     /** Undo: the record reappears in the exact position it was deleted from. */
-    suspend fun restore(id: String) = dao.restore(id)
+    suspend fun restore(id: String) = database.withTransaction {
+        val source = dao.findById(id) ?: return@withTransaction
+        // A return restored from the bin also restores its expense if needed.
+        source.returnOf?.let { parentId ->
+            val parent = dao.findById(parentId)
+            require(parent != null) { "Pengeluaran asal sudah dihapus permanen." }
+            if (parent.deletedAt != null) {
+                dao.restore(parentId)
+                dao.restoreReturnsOf(parentId, parent.deletedAt)
+            }
+        }
+        dao.restore(id)
+        source.deletedAt?.let { dao.restoreReturnsOf(id, it) }
+        val live = dao.getAllOnce().map { it.toDomain() }
+        val error = validateExpenseReturnGraph(live)
+        require(error == null) { error.orEmpty() }
+    }
 
     /**
      * Clears out anything that has sat in the bin for more than 30 days.
@@ -599,7 +732,7 @@ class TransactionRepository(
 
     /** Every live plan — the ones that are running and the ones that are paused. */
     fun observeSubscriptions(): Flow<List<Subscription>> =
-        subscriptionDao.observeAll().map { rows -> rows.map { it.toDomain() } }
+        combine(subscriptionDao.observeAll(), observeCategories()) { rows, categories -> rows.map { it.toDomain(categories) } }
 
     /**
      * Every plan with what it has actually cost so far and when it next bills.
@@ -615,11 +748,12 @@ class TransactionRepository(
             subscriptionDao.observeAll(),
             dao.observeSubscriptionCharges(),
             bankDao.observeAll(),
-        ) { rows, charges, banks ->
+            observeCategories(),
+        ) { rows, charges, banks, categories ->
             val counts = charges.associateBy { it.subscriptionId }
             val openBanks = banks.filter { it.archivedAt == null }.map { it.id }.toSet()
             rows.map { row ->
-                val subscription = row.toDomain()
+                val subscription = row.toDomain(categories)
                 SubscriptionUsage(
                     subscription = subscription,
                     chargeCount = counts[subscription.id]?.charges ?: 0,
@@ -640,7 +774,7 @@ class TransactionRepository(
         }
 
     suspend fun findSubscription(id: String): Subscription? =
-        subscriptionDao.findById(id)?.toDomain()
+        subscriptionDao.findById(id)?.toDomain(categoriesOnce())
 
     /**
      * Starts watching a recurring bill.
@@ -960,9 +1094,11 @@ class TransactionRepository(
      */
     suspend fun exportSnapshot(
         zone: ZoneId = ZoneId.systemDefault(),
-    ): List<TransactionExportRecord> {
+    ): List<TransactionExportRecord> = database.withTransaction {
         val names = bankDao.getAll().associate { it.id to it.name }
-        return dao.getAllOnce().map { TransactionExportRecord.from(it, zone, names) }
+        val categories = categoriesOnce()
+        resolveExpenseReturns(dao.getAllOnce().map { it.toDomain(categories) })
+            .map { TransactionExportRecord.from(it.toEntity(), zone, names, categories) }
     }
 
     /**
@@ -978,11 +1114,12 @@ class TransactionRepository(
      * takes its pictures out of the backup with it, for the same reason it takes
      * itself out.
      */
-    suspend fun exportBackup(zone: ZoneId = ZoneId.systemDefault()): BackupDocument {
+    suspend fun exportBackup(zone: ZoneId = ZoneId.systemDefault()): BackupDocument = database.withTransaction {
         val items = balanceCheckDao.getAllItems().groupBy { it.checkId }
         val bankNames = bankDao.getAll().associate { it.id to it.name }
+        val categories = categoriesOnce()
         val live = dao.getAllOnce().map { it.id }.toSet()
-        return BackupDocument.build(
+        BackupDocument.build(
             openingBalances = openingBalanceDao.getAll().toOpeningBalances(),
             banks = bankDao.getAll().map { BankExportRecord.from(it, zone) },
             transactions = exportSnapshot(zone),
@@ -996,9 +1133,10 @@ class TransactionRepository(
                 .filter { it.transactionId in live }
                 .map { AttachmentExportRecord.from(it, zone) },
             subscriptions = subscriptionDao.getAllOnce().map {
-                SubscriptionExportRecord.from(it, zone, bankNames)
+                SubscriptionExportRecord.from(it, zone, bankNames, categories)
             },
             zone = zone,
+            categories = categoryDao.getAll().map { CategoryExportRecord(it.id, it.label, it.type, it.archived) },
         )
     }
 
@@ -1035,7 +1173,10 @@ class TransactionRepository(
      * when its picture is on this phone, because a note claiming a lampiran it
      * cannot show is worse than a note with none.
      */
-    suspend fun importBackup(document: BackupDocument): ImportResult {
+    suspend fun importBackup(document: BackupDocument): ImportResult = database.withTransaction {
+        require(document.recognised) { "Format cadangan tidak didukung." }
+        val categories = document.categories.mapNotNull { it.toEntity() }
+        if (categories.isNotEmpty()) categoryDao.upsertAll(categories)
         val banks = document.banks.mapNotNull { it.toEntity() }
         if (banks.isNotEmpty()) bankDao.upsertAll(banks)
 
@@ -1046,6 +1187,11 @@ class TransactionRepository(
         val added = entities.count { it.id !in existing }
 
         if (entities.isNotEmpty()) dao.upsertAll(entities)
+        // Validate the merged graph as a whole. A malformed backup rolls back
+        // instead of silently turning a return into earnings or over-refunding.
+        val merged = dao.getAllOnce().map { it.toDomain() }
+        val error = validateExpenseReturnGraph(merged)
+        require(error == null) { "Tautan pengembalian pada cadangan tidak valid: " + error.orEmpty() }
 
         // A check's lines are replaced wholesale rather than merged one by one:
         // they are read as a set, and a merge could otherwise leave a line from
@@ -1102,7 +1248,7 @@ class TransactionRepository(
 
         val foldedInto = normaliseBanks()
 
-        return ImportResult(
+        ImportResult(
             added = added,
             updated = entities.size - added,
             skipped = skipped,

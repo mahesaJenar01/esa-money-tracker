@@ -88,6 +88,7 @@ fun SubscriptionFormScreen(
     onNameChanged: (String) -> Unit,
     onAmountChanged: (String) -> Unit,
     onChooseCategory: (Category) -> Unit,
+    onManageCategories: () -> Unit,
     onChoosePocket: (Pocket) -> Unit,
     onChooseBank: (String) -> Unit,
     onAddBank: (String, BankColor, Long, BankFunding) -> Unit,
@@ -220,6 +221,7 @@ fun SubscriptionFormScreen(
                         selected = state.category,
                         onSelect = onChooseCategory,
                     )
+                    androidx.compose.material3.TextButton(onClick = onManageCategories) { Text("Tambah / kelola kategori") }
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

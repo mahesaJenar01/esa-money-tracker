@@ -3,6 +3,8 @@ package com.esa.moneytracker.ui.home
 import com.esa.moneytracker.data.model.BalanceCheck
 import com.esa.moneytracker.data.model.Transaction
 import com.esa.moneytracker.data.model.TransactionType
+import com.esa.moneytracker.data.model.earnedIncome
+import com.esa.moneytracker.data.model.expenseContribution
 import com.esa.moneytracker.util.CurrencyFormatter
 import kotlin.math.absoluteValue
 
@@ -55,10 +57,13 @@ object LocalFinancialInsightProvider : FinancialInsightProvider {
         transactions: List<Transaction>,
         checks: List<BalanceCheck>,
     ): FinancialInsight {
-        val income = transactions.filter { it.type == TransactionType.INCOME }
+        val income = transactions.filter { it.type == TransactionType.INCOME && !it.isReturn }
+        val returns = transactions.filter { it.isReturn }.groupBy { it.returnOf }
         val expenses = transactions.filter { it.type == TransactionType.EXPENSE }
+            .map { it.copy(amount = (it.amount - returns[it.id].orEmpty().sumOf { linked -> linked.amount }).coerceAtLeast(0)) }
+            .filter { it.amount > 0 }
         val totalIncome = income.sumOf { it.amount }
-        val totalExpense = expenses.sumOf { it.amount }
+        val totalExpense = transactions.sumOf { it.expenseContribution }
         val net = totalIncome - totalExpense
 
         val largestExpense = expenses.maxByOrNull { it.amount }?.toInsight()
@@ -83,7 +88,7 @@ object LocalFinancialInsightProvider : FinancialInsightProvider {
             totalAbsoluteDifference = mismatches.sumOf { it.difference.absoluteValue },
             largestAbsoluteDifference = mismatches.maxOfOrNull { it.difference.absoluteValue } ?: 0,
         )
-        val savingRate = if (totalIncome > 0) {
+        val savingRate = if (totalIncome > 0 && net <= totalIncome) {
             ((net.toDouble() / totalIncome.toDouble()) * 100).toInt().coerceIn(-999, 100)
         } else {
             null
@@ -126,7 +131,7 @@ object LocalFinancialInsightProvider : FinancialInsightProvider {
             return "Belum ada transaksi pada periode ini. Tambahkan catatan agar AI bisa menemukan polanya."
         }
         val flow = "Dari $count transaksi, uang masuk ${CurrencyFormatter.rupiah(income)} " +
-            "dan keluar ${CurrencyFormatter.rupiah(expense)}."
+            "dan pengeluaran bersih ${CurrencyFormatter.rupiah(expense)}."
         return when {
             net > 0L -> "$flow Arus kasmu positif ${CurrencyFormatter.rupiah(net)}."
             net < 0L -> "$flow Pengeluaran lebih besar ${CurrencyFormatter.rupiah(-net)}."

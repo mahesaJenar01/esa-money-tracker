@@ -28,6 +28,8 @@ class MoneyTrackerApp : Application() {
             database.attachmentDao(),
             database.subscriptionDao(),
             AttachmentStore(this),
+            database.categoryDao(),
+            database,
         )
     }
 

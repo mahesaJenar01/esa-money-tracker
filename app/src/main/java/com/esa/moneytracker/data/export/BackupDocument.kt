@@ -81,6 +81,7 @@ data class BackupDocument(
      */
     @SerialName("subscriptions") val subscriptions: List<SubscriptionExportRecord> =
         emptyList(),
+    @SerialName("categories") val categories: List<CategoryExportRecord> = emptyList(),
 ) {
     /** True for a file written before banks existed. */
     val preBanks: Boolean get() = formatVersion < 2 || banks.isEmpty()
@@ -92,7 +93,7 @@ data class BackupDocument(
 
     companion object {
         const val APP_ID = "esa-money-tracker"
-        const val FORMAT_VERSION = 6
+        const val FORMAT_VERSION = 7
 
         private val json = Json {
             prettyPrint = true
@@ -110,6 +111,7 @@ data class BackupDocument(
             subscriptions: List<SubscriptionExportRecord>,
             zone: ZoneId,
             now: Instant = Instant.now(),
+            categories: List<CategoryExportRecord> = emptyList(),
         ): BackupDocument = BackupDocument(
             exportedAt = DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(now.atZone(zone)),
             openingBalance = OpeningBalanceRecord.from(openingBalances, zone),
@@ -119,6 +121,7 @@ data class BackupDocument(
             transfers = transfers,
             attachments = attachments,
             subscriptions = subscriptions,
+            categories = categories,
         )
 
         /** Null when the text is not JSON at all; check [recognised] after that. */

@@ -59,6 +59,8 @@ import com.esa.moneytracker.data.model.TransactionType
 import com.esa.moneytracker.ui.components.AmountField
 import com.esa.moneytracker.ui.components.AttachmentPicker
 import com.esa.moneytracker.ui.components.DescriptionField
+import com.esa.moneytracker.ui.components.TagsField
+import androidx.compose.material3.TextButton
 import com.esa.moneytracker.ui.components.FieldLabel
 import com.esa.moneytracker.ui.components.IconBadge
 import com.esa.moneytracker.ui.components.PocketPicker
@@ -80,11 +82,13 @@ fun EntryScreen(
     onChooseType: (TransactionType) -> Unit,
     onChooseTransfer: () -> Unit,
     onChooseCategory: (Category) -> Unit,
+    onManageCategories: () -> Unit,
     onChoosePocket: (Pocket) -> Unit,
     onChooseBank: (String) -> Unit,
     onAddBank: (String, BankColor, Long, BankFunding) -> Unit,
     onAmountChanged: (String) -> Unit,
     onDescriptionChanged: (String) -> Unit,
+    onTagsChanged: (String) -> Unit,
     onOccurredAtChanged: (LocalDateTime) -> Unit,
     onResetOccurredAt: () -> Unit,
     onPickAttachment: (Uri) -> Unit,
@@ -120,7 +124,7 @@ fun EntryScreen(
             ) { step ->
                 when (step) {
                     EntryStep.TYPE -> TypeStep(onChooseType, onChooseTransfer)
-                    EntryStep.CATEGORY -> CategoryStep(state, onChooseCategory)
+                    EntryStep.CATEGORY -> CategoryStep(state, onChooseCategory, onManageCategories)
                     EntryStep.DETAILS -> DetailsStep(
                         state = state,
                         onChoosePocket = onChoosePocket,
@@ -128,6 +132,7 @@ fun EntryScreen(
                         onAddBank = onAddBank,
                         onAmountChanged = onAmountChanged,
                         onDescriptionChanged = onDescriptionChanged,
+                        onTagsChanged = onTagsChanged,
                         onOccurredAtChanged = onOccurredAtChanged,
                         onResetOccurredAt = onResetOccurredAt,
                         onPickAttachment = onPickAttachment,
@@ -322,7 +327,7 @@ private fun TypeCard(
 }
 
 @Composable
-private fun CategoryStep(state: EntryUiState, onChoose: (Category) -> Unit) {
+private fun CategoryStep(state: EntryUiState, onChoose: (Category) -> Unit, onManageCategories: () -> Unit) {
     val colors = MoneyTheme.colors
 
     Column(
@@ -339,6 +344,7 @@ private fun CategoryStep(state: EntryUiState, onChoose: (Category) -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
+        TextButton(onClick = onManageCategories) { Text("Tambah / kelola kategori") }
         state.categories.forEach { category ->
             val tint = colors.forCategory(category)
             Row(
@@ -377,6 +383,7 @@ private fun DetailsStep(
     onAddBank: (String, BankColor, Long, BankFunding) -> Unit,
     onAmountChanged: (String) -> Unit,
     onDescriptionChanged: (String) -> Unit,
+    onTagsChanged: (String) -> Unit,
     onOccurredAtChanged: (LocalDateTime) -> Unit,
     onResetOccurredAt: () -> Unit,
     onPickAttachment: (Uri) -> Unit,
@@ -502,6 +509,9 @@ private fun DetailsStep(
 
         Spacer(Modifier.height(18.dp))
 
+        TagsField(state.tagsText, onTagsChanged, state.knownTags)
+        Spacer(Modifier.height(18.dp))
+
         FieldLabel("Lampiran (opsional)")
         Spacer(Modifier.height(8.dp))
         AttachmentPicker(
@@ -524,6 +534,7 @@ private fun DetailsStep(
 
         Spacer(Modifier.height(24.dp))
 
+        if (state.saveMessage != null) Text(state.saveMessage, color = MaterialTheme.colorScheme.error)
         SubmitButton(
             label = "Simpan " + CurrencyFormatter.rupiah(state.amount),
             onClick = onSubmit,

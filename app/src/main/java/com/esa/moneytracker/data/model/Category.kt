@@ -1,30 +1,31 @@
 package com.esa.moneytracker.data.model
 
 /**
- * The fixed set of categories, split by [TransactionType].
+ * Built-in and personal categories, split by [TransactionType].
  *
- * [id] is the persisted / exported value. Adding a category later is a matter
- * of adding one constant here; nothing else in the app hard-codes the list.
+ * [id] is stable across renaming, archiving, and backup. Personal definitions
+ * are stored separately; all pickers receive the combined list.
  */
-enum class Category(
+data class Category(
     val id: String,
     val label: String,
     val type: TransactionType,
+    val archived: Boolean = false,
 ) {
-    // Income
-    GAJI("gaji", "Gaji", TransactionType.INCOME),
-    PENDAPATAN_LAINNYA("pendapatan_lainnya", "Pendapatan Lainnya", TransactionType.INCOME),
-
-    // Expense
-    JAJAN("jajan", "Jajan", TransactionType.EXPENSE),
-    OPERATIONAL("operational", "Operational", TransactionType.EXPENSE),
-    MAKAN("makan", "Makan", TransactionType.EXPENSE),
-    LANGGANAN("langganan", "Langganan", TransactionType.EXPENSE),
-    KEBUTUHAN("kebutuhan", "Kebutuhan", TransactionType.EXPENSE),
-    BELANJA("belanja", "Belanja", TransactionType.EXPENSE),
-    LAINNYA("lainnya", "Lainnya", TransactionType.EXPENSE);
+    val custom: Boolean get() = entries.none { it.id == id }
 
     companion object {
+        val GAJI = Category("gaji", "Gaji", TransactionType.INCOME)
+        val PENDAPATAN_LAINNYA = Category("pendapatan_lainnya", "Pendapatan Lainnya", TransactionType.INCOME)
+        val JAJAN = Category("jajan", "Jajan", TransactionType.EXPENSE)
+        val OPERATIONAL = Category("operational", "Operational", TransactionType.EXPENSE)
+        val MAKAN = Category("makan", "Makan", TransactionType.EXPENSE)
+        val LANGGANAN = Category("langganan", "Langganan", TransactionType.EXPENSE)
+        val KEBUTUHAN = Category("kebutuhan", "Kebutuhan", TransactionType.EXPENSE)
+        val BELANJA = Category("belanja", "Belanja", TransactionType.EXPENSE)
+        val LAINNYA = Category("lainnya", "Lainnya", TransactionType.EXPENSE)
+        val entries = listOf(GAJI, PENDAPATAN_LAINNYA, JAJAN, OPERATIONAL, MAKAN, LANGGANAN, KEBUTUHAN, BELANJA, LAINNYA)
+
         fun of(type: TransactionType): List<Category> = entries.filter { it.type == type }
 
         fun fromId(id: String): Category? = entries.firstOrNull { it.id == id }

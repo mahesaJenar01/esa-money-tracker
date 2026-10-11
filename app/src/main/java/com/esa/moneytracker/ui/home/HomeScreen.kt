@@ -71,6 +71,9 @@ fun HomeScreen(
     onSelectPeriod: (AnalyticsPeriod) -> Unit,
     onAddClick: () -> Unit,
     onEdit: (String) -> Unit,
+    onAddReturn: (String) -> Unit,
+    onManageCategories: () -> Unit,
+    onDismissMessage: () -> Unit,
     onDelete: (String) -> Unit,
     onRestore: (String) -> Unit,
     onDeleteCheck: (String) -> Unit,
@@ -85,6 +88,9 @@ fun HomeScreen(
     val zone = remember { ZoneId.systemDefault() }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    androidx.compose.runtime.LaunchedEffect(state.message) {
+        state.message?.let { snackbarHostState.showSnackbar(it); onDismissMessage() }
+    }
 
     // Which row has its actions open. Only one at a time, so the list never
     // turns into a wall of buttons.
@@ -125,6 +131,9 @@ fun HomeScreen(
                 )
             }
 
+            item("categories") {
+                androidx.compose.material3.TextButton(onClick = onManageCategories, modifier = Modifier.padding(horizontal = 16.dp)) { Text("Kelola kategori") }
+            }
             item("subscriptions") {
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     Spacer(Modifier.height(20.dp))
@@ -216,6 +225,8 @@ fun HomeScreen(
                                 val transaction = entry.transaction
                                 TransactionListItem(
                                     transaction = transaction,
+                                        onAddReturn = { onAddReturn(transaction.id) },
+                                        onOpenExpense = { transaction.returnOf?.let(onEdit) },
                                     zone = zone,
                                     bankLabel = state.bankNames[transaction.bankId],
                                     attachments = state.attachments[transaction.id].orEmpty(),

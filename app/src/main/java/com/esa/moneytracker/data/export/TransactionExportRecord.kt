@@ -4,6 +4,10 @@ import com.esa.moneytracker.data.local.TransactionEntity
 import com.esa.moneytracker.data.model.Category
 import com.esa.moneytracker.data.model.Pocket
 import com.esa.moneytracker.data.model.TransactionType
+import com.esa.moneytracker.data.model.ReturnKind
+import com.esa.moneytracker.data.model.normalizeTags
+import com.esa.moneytracker.data.local.decodeTags
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.time.Instant
@@ -53,6 +57,9 @@ data class TransactionExportRecord(
      * since that count is read off the notes rather than stored.
      */
     @SerialName("subscription") val subscription: String = "",
+    @SerialName("tags") val tags: List<String> = emptyList(),
+    @SerialName("return_of") val returnOf: String = "",
+    @SerialName("return_kind") val returnKind: String = "",
 ) {
     companion object {
         /** Column order for a tabular (CSV / spreadsheet) export. */
@@ -61,6 +68,7 @@ data class TransactionExportRecord(
             "type", "type_label", "pocket", "pocket_label", "bank", "bank_label",
             "category", "category_label", "amount", "signed_amount", "description",
             "subscription",
+            "tags", "return_of", "return_kind",
         )
 
         private val DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd")
@@ -71,11 +79,12 @@ data class TransactionExportRecord(
             zone: ZoneId,
             /** Bank id to name, so the file reads without the app. */
             bankNames: Map<String, String> = emptyMap(),
+            categories: List<Category> = Category.entries,
         ): TransactionExportRecord {
             val local = Instant.ofEpochMilli(entity.occurredAt).atZone(zone)
             val type = TransactionType.fromId(entity.type)
             val pocket = Pocket.fromId(entity.pocket)
-            val category = Category.fromId(entity.category)
+            val category = categories.firstOrNull { it.id == entity.category }
             return TransactionExportRecord(
                 id = entity.id,
                 date = DATE.format(local),
@@ -90,7 +99,7 @@ data class TransactionExportRecord(
                     }
                     .orEmpty(),
                 type = type.id,
-                typeLabel = type.label,
+                typeLabel = ReturnKind.fromId(entity.returnKind)?.label ?: type.label,
                 pocket = pocket.id,
                 pocketLabel = pocket.label,
                 bank = entity.bank.orEmpty(),
@@ -101,6 +110,9 @@ data class TransactionExportRecord(
                 signedAmount = if (type == TransactionType.INCOME) entity.amount else -entity.amount,
                 description = entity.description,
                 subscription = entity.subscription.orEmpty(),
+                tags = decodeTags(entity.tags),
+                returnOf = entity.returnOf.orEmpty(),
+                returnKind = entity.returnKind.orEmpty(),
             )
         }
 
@@ -115,6 +127,7 @@ data class TransactionExportRecord(
         type, typeLabel, pocket, pocketLabel, bank, bankLabel,
         category, categoryLabel, amount.toString(), signedAmount.toString(), description,
         subscription,
+        tags.joinToString(", "), returnOf, returnKind,
     )
 
     /**
@@ -126,6 +139,8 @@ data class TransactionExportRecord(
      */
     fun toEntity(): TransactionEntity? {
         if (id.isBlank() || amount < 0L) return null
+        if (returnOf.isNotBlank() && (type != TransactionType.INCOME.id || ReturnKind.fromId(returnKind) == null || amount == 0L || returnOf == id)) return null
+        if (returnOf.isBlank() && returnKind.isNotBlank()) return null
         val occurred = parseInstant(timestampIso) ?: return null
         val created = parseInstant(createdIso) ?: occurred
         val resolvedPocket = Pocket.fromId(pocket)
@@ -144,6 +159,9 @@ data class TransactionExportRecord(
             createdAt = created.toEpochMilli(),
             updatedAt = parseInstant(updatedIso)?.toEpochMilli(),
             deletedAt = null,
+            tags = Json.encodeToString(normalizeTags(tags)),
+            returnOf = returnOf.takeIf { it.isNotBlank() },
+            returnKind = returnKind.takeIf { returnOf.isNotBlank() },
         )
     }
 }

@@ -44,9 +44,17 @@ import com.esa.moneytracker.ui.transfer.TransfersScreen
 import com.esa.moneytracker.ui.transfer.TransfersViewModel
 import com.esa.moneytracker.ui.viewer.AttachmentViewerScreen
 import com.esa.moneytracker.ui.viewer.AttachmentViewerViewModel
+import com.esa.moneytracker.ui.categories.CategoriesScreen
+import com.esa.moneytracker.ui.categories.CategoriesViewModel
+import com.esa.moneytracker.ui.returns.ReturnScreen
+import com.esa.moneytracker.ui.returns.ReturnViewModel
 
 object Routes {
     const val HOME = "home"
+    const val CATEGORIES = "categories"
+    const val RETURN_ARG = "expenseId"
+    const val RETURN_NEW = "return-new/{$RETURN_ARG}"
+    fun returnNew(id: String): String = "return-new/$id"
     const val ENTRY = "entry"
 
     /** The full week-by-week history. */
@@ -156,8 +164,11 @@ private fun MainNavHost(
             HomeScreen(
                 state = state,
                 onSelectPeriod = viewModel::selectPeriod,
+                onDismissMessage = viewModel::dismissMessage,
                 onAddClick = { navController.navigate(Routes.ENTRY) },
                 onEdit = { navController.navigate(Routes.edit(it)) },
+                onAddReturn = { navController.navigate(Routes.returnNew(it)) },
+                onManageCategories = { navController.navigate(Routes.CATEGORIES) },
                 onDelete = viewModel::delete,
                 onRestore = viewModel::restore,
                 onDeleteCheck = viewModel::deleteCheck,
@@ -171,6 +182,20 @@ private fun MainNavHost(
             )
         }
 
+        composable(Routes.CATEGORIES) {
+            val viewModel: CategoriesViewModel = viewModel(factory = CategoriesViewModel.Factory)
+            val state by viewModel.state.collectAsStateWithLifecycle()
+            CategoriesScreen(state, { navController.popBackStack() }, viewModel::save, viewModel::archive, viewModel::dismissError)
+        }
+        composable(Routes.RETURN_NEW, arguments = listOf(navArgument(Routes.RETURN_ARG) { type = NavType.StringType })) { entry ->
+            val id = entry.arguments?.getString(Routes.RETURN_ARG).orEmpty()
+            val viewModel: ReturnViewModel = viewModel(key = "return-" + id, factory = ReturnViewModel.factory(id))
+            val state by viewModel.state.collectAsStateWithLifecycle()
+            LaunchedEffect(state.saved) { if (state.saved) navController.popBackStack() }
+            ReturnScreen(state, { navController.popBackStack() }, viewModel::chooseKind, viewModel::onAmountChanged,
+                viewModel::choosePocket, viewModel::chooseBank, viewModel::addBank, viewModel::onDescriptionChanged,
+                viewModel::onTagsChanged, viewModel::onOccurredAtChanged, viewModel::resetOccurredAt, viewModel::submit)
+        }
         composable(Routes.ENTRY) {
             val viewModel: EntryViewModel = viewModel(factory = EntryViewModel.Factory)
             val state by viewModel.state.collectAsStateWithLifecycle()
@@ -194,11 +219,13 @@ private fun MainNavHost(
                     }
                 },
                 onChooseCategory = viewModel::chooseCategory,
+                onManageCategories = { navController.navigate(Routes.CATEGORIES) },
                 onChoosePocket = viewModel::choosePocket,
                 onChooseBank = viewModel::chooseBank,
                 onAddBank = viewModel::addBank,
                 onAmountChanged = viewModel::onAmountChanged,
                 onDescriptionChanged = viewModel::onDescriptionChanged,
+                onTagsChanged = viewModel::onTagsChanged,
                 onOccurredAtChanged = viewModel::onOccurredAtChanged,
                 onResetOccurredAt = viewModel::resetOccurredAt,
                 onPickAttachment = viewModel::addAttachment,
@@ -219,6 +246,8 @@ private fun MainNavHost(
                 onOlderWeek = viewModel::showOlderWeek,
                 onNewerWeek = viewModel::showNewerWeek,
                 onEdit = { navController.navigate(Routes.edit(it)) },
+                onAddReturn = { navController.navigate(Routes.returnNew(it)) },
+                onManageCategories = { navController.navigate(Routes.CATEGORIES) },
                 onDelete = viewModel::delete,
                 onRestore = viewModel::restore,
                 onDeleteCheck = viewModel::deleteCheck,
@@ -227,6 +256,8 @@ private fun MainNavHost(
                 },
                 onOpenBin = { navController.navigate(Routes.BIN) },
                 onCheckBalance = { navController.navigate(Routes.CHECK) },
+                onSelectTag = viewModel::selectTag,
+                onDismissMessage = viewModel::dismissMessage,
             )
         }
 
@@ -238,6 +269,7 @@ private fun MainNavHost(
                 state = state,
                 onBack = { navController.popBackStack() },
                 onRestore = viewModel::restore,
+                onDismissMessage = viewModel::dismissMessage,
             )
         }
 
@@ -372,13 +404,19 @@ private fun MainNavHost(
 
             EditScreen(
                 state = state,
+                onChooseReturnKind = viewModel::chooseReturnKind,
+                onOpenExpense = { navController.navigate(Routes.edit(it)) },
+                onAddReturn = { navController.navigate(Routes.returnNew(it)) },
+                onEditLinkedReturn = { navController.navigate(Routes.edit(it)) },
                 onChooseType = viewModel::chooseType,
                 onChooseCategory = viewModel::chooseCategory,
+                onManageCategories = { navController.navigate(Routes.CATEGORIES) },
                 onChoosePocket = viewModel::choosePocket,
                 onChooseBank = viewModel::chooseBank,
                 onAddBank = viewModel::addBank,
                 onAmountChanged = viewModel::onAmountChanged,
                 onDescriptionChanged = viewModel::onDescriptionChanged,
+                onTagsChanged = viewModel::onTagsChanged,
                 onOccurredAtChanged = viewModel::onOccurredAtChanged,
                 onResetOccurredAt = viewModel::resetOccurredAt,
                 onPickAttachment = viewModel::addAttachment,
@@ -439,6 +477,7 @@ private fun SubscriptionRoute(
         onNameChanged = viewModel::onNameChanged,
         onAmountChanged = viewModel::onAmountChanged,
         onChooseCategory = viewModel::chooseCategory,
+        onManageCategories = { navController.navigate(Routes.CATEGORIES) },
         onChoosePocket = viewModel::choosePocket,
         onChooseBank = viewModel::chooseBank,
         onAddBank = viewModel::addBank,
